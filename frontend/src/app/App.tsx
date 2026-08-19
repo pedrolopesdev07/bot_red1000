@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type FormEvent } from "react";
+import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
 import {
   Home, PenLine, Clock, CreditCard, User, LogOut, ChevronRight,
   Sparkles, TrendingUp, ArrowLeft, FileText, BarChart3, Users,
@@ -42,7 +42,7 @@ interface Competencia {
   evidencias: Evidencia[];
 }
 
-interface ApiUser { id: number; email: string | null; role: string; plan: string; bonus_credits: number; reminders_enabled: boolean; csrf_token: string; subscription_status: string }
+interface ApiUser { id: number; username: string | null; email: string | null; role: string; plan: string; bonus_credits: number; reminders_enabled: boolean; csrf_token: string; subscription_status: string }
 interface ApiUsage { plan: string; limit: number | string; used: number; remaining: number | string; next_credit_at: string | null; bonus_credits: number }
 interface ApiAnalysisSummary { id: string; status: string; created_at: string; completed_at: string | null; total_score: number | null; summary: string | null }
 interface ApiAnalysisDetail extends ApiAnalysisSummary { text: string | null; competency_scores: Array<number | null>; feedback: Record<string, any> | null; detailed_feedback: boolean; topic: string | null }
@@ -64,8 +64,8 @@ async function api<T>(path: string, options: RequestInit = {}, csrfToken?: strin
 }
 
 function displayIdentity(user: ApiUser | null) {
-  const email = user?.email || "Conta local";
-  const local = email.includes("@") ? email.split("@")[0] : email;
+  const email = user?.email || user?.username || "Conta local";
+  const local = user?.username || (email.includes("@") ? email.split("@")[0] : email);
   const name = local.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "U";
   return { name, email, initials };
@@ -497,12 +497,30 @@ function FuturoBadge() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
-function TopNav({ view, onNav, credits, initials }: { view: View; onNav: (v: View) => void; credits: number; initials: string }) {
+function TopNav({ view, onNav, onLogout, credits, initials, username }: { view: View; onNav: (v: View) => void; onLogout: () => void; credits: number; initials: string; username: string }) {
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const links: { id: View; label: string }[] = [
     { id: "dashboard", label: "Início" },
     { id: "historico", label: "Histórico" },
     { id: "planos", label: "Planos" },
   ];
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    function closeMenu(event: MouseEvent) {
+      if (!profileMenuRef.current?.contains(event.target as Node)) setProfileMenuOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setProfileMenuOpen(false);
+    }
+    document.addEventListener("mousedown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [profileMenuOpen]);
 
   return (
     <header
@@ -541,9 +559,29 @@ function TopNav({ view, onNav, credits, initials }: { view: View; onNav: (v: Vie
 
       <div className="flex items-center gap-3">
         <CreditBadge credits={credits} />
-        <button onClick={() => onNav("perfil")}>
-          <UserAvatar iniciais={initials} />
-        </button>
+        <div ref={profileMenuRef} className="relative">
+          <button
+            type="button" aria-label="Abrir menu do perfil" aria-haspopup="menu" aria-expanded={profileMenuOpen}
+            onClick={() => setProfileMenuOpen((open) => !open)}
+            className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 focus-visible:ring-offset-2"
+          >
+            <UserAvatar iniciais={initials} />
+          </button>
+          {profileMenuOpen && (
+            <div role="menu" className="absolute right-0 top-[calc(100%+.7rem)] w-56 overflow-hidden rounded-2xl bg-white p-2" style={{ border: "1px solid rgba(109,40,217,.14)", boxShadow: "0 18px 45px rgba(47,35,65,.18)" }}>
+              <div className="px-3 py-2 mb-1 border-b" style={{ borderColor: "rgba(109,40,217,.1)" }}>
+                <p className="truncate text-sm font-bold" style={{ color: "#2F2341" }}>{username}</p>
+                <p className="text-xs" style={{ color: "#7B6D8E" }}>Minha conta</p>
+              </div>
+              <button role="menuitem" onClick={() => { setProfileMenuOpen(false); onNav("perfil"); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-purple-50" style={{ color: "#4C1D95" }}>
+                <User size={16} /> Ver perfil
+              </button>
+              <button role="menuitem" onClick={() => { setProfileMenuOpen(false); onLogout(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-red-50" style={{ color: "#DC2626" }}>
+                <LogOut size={16} /> Sair
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );
@@ -598,7 +636,60 @@ function BottomNav({ view, onNav }: { view: View; onNav: (v: View) => void }) {
 
 // ─── Views ────────────────────────────────────────────────────────────────────
 
-function LoginView({ onLogin }: { onLogin: () => void }) {
+function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleCredentials(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setLoading(true); setMessage("");
+      await api(`/api/v1/auth/${mode === "login" ? "login" : "register"}`, {
+        method: "POST", body: JSON.stringify({ username, password }),
+      });
+      await onAuthenticated();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "Não foi possível acessar sua conta");
+    } finally { setLoading(false); }
+  }
+
+  const inputStyle = { fontFamily: ff.body, fontSize: "1rem", background: "#16121F", color: "#F7F5FB", border: "1px solid rgba(139,92,246,0.25)" };
+  return <div className="auth-page min-h-screen flex items-center justify-center p-6" style={{ background: "#08070C" }}>
+    <div className="auth-shell w-full max-w-sm">
+      <div className="auth-heading flex flex-col items-center mb-8">
+        <div className="auth-logo w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: "linear-gradient(145deg, #5B21B6, #8B5CF6)", boxShadow: "0 0 32px rgba(139,92,246,.45)" }}>
+          <span style={{ fontFamily: ff.display, fontSize: "2.1rem", fontWeight: 700, color: "#fff" }}>R</span>
+        </div>
+        <h1 className="auth-title" style={{ fontFamily: ff.display, fontSize: "2.2rem", fontWeight: 700, color: "#F7F5FB" }}>Reda<span>1000</span>IA</h1>
+        <p className="auth-subtitle" style={{ color: "#9D94AC", marginTop: 8 }}>{mode === "login" ? "Entre na sua conta" : "Crie sua conta gratuita"}</p>
+      </div>
+      <form onSubmit={handleCredentials} className="auth-card flex flex-col gap-4 p-5 rounded-2xl" style={{ background: "#100D18", border: "1px solid rgba(139,92,246,.2)" }}>
+        <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Nome de usuário
+          <div className="relative mt-1.5"><User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
+            <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.-]+" value={username} onChange={(e) => setUsername(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
+          </div>
+        </label>
+        <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Senha
+          <div className="relative mt-1.5"><Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
+            <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Mínimo de 8 caracteres" />
+          </div>
+        </label>
+        {message && <p role="alert" style={{ color: "#F87171", fontSize: ".82rem" }}>{message}</p>}
+        <button disabled={loading} className="auth-submit w-full py-3 rounded-xl flex justify-center gap-2" style={{ color: "#fff", fontWeight: 700, background: "linear-gradient(135deg,#5B21B6,#8B5CF6)", opacity: loading ? .7 : 1 }}>
+          {loading ? <RefreshCw size={17} className="animate-spin" /> : mode === "login" ? "Entrar" : "Criar conta"}
+        </button>
+        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
+          {mode === "login" ? "Ainda não tenho conta" : "Já tenho uma conta"}
+        </button>
+      </form>
+    </div>
+  </div>;
+}
+
+function LegacyLoginView({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1674,6 +1765,10 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
       : plan.name === "PREMIUM"
         ? ["5 correções por dia", "Feedback e evidências completos", "Pontos de melhoria liberados"]
         : ["Correções ilimitadas", "Feedback e evidências completos", "Pontos de melhoria liberados", "Histórico completo de evolução"],
+    destaque: plan.name === "PREMIUM" ? "RECOMENDADO" : plan.name === "ULTRA_PREMIUM" ? "MÁXIMA PERFORMANCE" : null,
+    chamada: plan.name === "FREE" ? "Comece sem compromisso" : plan.name === "PREMIUM" ? "Evolua com constância" : "Treine sem limites",
+    precoRegular: plan.name === "PREMIUM" ? "R$ 69,99" : plan.name === "ULTRA_PREMIUM" ? "R$ 259,99" : null,
+    desconto: plan.name === "PREMIUM" ? "43% OFF" : plan.name === "ULTRA_PREMIUM" ? "62% OFF" : null,
   }));
   async function startCheckout(product: "premium" | "ultra_premium" | "credits", creditAmount?: 150 | 270 | 750 | 1050) {
     try {
@@ -1720,13 +1815,19 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
                   Plano atual
                 </div>
               )}
+              {p.destaque && !p.current && <span className="plan-highlight">{p.destaque}</span>}
               <h3 style={{ fontFamily: ff.display, fontSize: "1.3rem", fontWeight: 700, color: "#F7F5FB", marginBottom: 4 }}>{p.nome}</h3>
+              <p className="plan-pitch">{p.chamada}</p>
+              {p.precoRegular && <div className="plan-offer">
+                <div className="plan-offer-badges"><span><Clock size={12} /> PREÇO PROMOCIONAL</span><strong>{p.desconto}</strong></div>
+                <p>De <del>{p.precoRegular}</del> por apenas</p>
+              </div>}
               <div className="flex items-baseline gap-1 mb-1">
                 <span style={{ fontFamily: ff.mono, fontSize: "1.9rem", fontWeight: 700, color: p.cor }}>{p.preco}</span>
                 <span style={{ fontFamily: ff.body, fontSize: "0.84rem", color: "#9D94AC" }}>{p.periodo}</span>
               </div>
               <p style={{ fontFamily: ff.mono, fontSize: "0.82rem", color: p.cor, marginBottom: 14 }}>
-                {p.creditos === -1 ? "∞ correções" : `${p.creditos} correção(ões)/dia`}
+                {p.creditos === -1 ? "Correções ilimitadas" : `${p.creditos} ${p.creditos === 1 ? "correção" : "correções"} por dia`}
               </p>
               <ul className="flex flex-col gap-2 mb-5">
                 {p.features.map((f, i) => (
@@ -1809,7 +1910,7 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
   );
 }
 
-function PerfilView({ onNav, user, usage, analyses, onToggleReminders, onDeleteAccount }: { onNav: (v: View) => void; user: ApiUser | null; usage: ApiUsage | null; analyses: ApiAnalysisSummary[]; onToggleReminders: () => void; onDeleteAccount: () => void }) {
+function PerfilView({ onNav, user, usage, analyses, onToggleReminders, onLogout, onDeleteAccount }: { onNav: (v: View) => void; user: ApiUser | null; usage: ApiUsage | null; analyses: ApiAnalysisSummary[]; onToggleReminders: () => void; onLogout: () => void; onDeleteAccount: () => void }) {
   const identity = displayIdentity(user);
   const completed = analyses.filter((item) => item.total_score !== null);
   const average = completed.length ? Math.round(completed.reduce((sum, item) => sum + Number(item.total_score), 0) / completed.length) : 0;
@@ -1854,6 +1955,7 @@ function PerfilView({ onNav, user, usage, analyses, onToggleReminders, onDeleteA
           { Icon: CreditCard, label: "Planos e créditos", action: () => onNav("planos") },
           { Icon: Bell, label: `Notificações: ${user?.reminders_enabled ? "ativadas" : "desativadas"}`, action: onToggleReminders },
           ...(user?.role === "ADMIN" ? [{ Icon: Shield, label: "Painel administrativo", action: () => onNav("admin") }] : []),
+          { Icon: LogOut, label: "Sair da conta", action: onLogout },
           { Icon: LogOut, label: "Excluir minha conta e dados", action: onDeleteAccount },
         ].map((item) => (
             <button
@@ -2090,6 +2192,7 @@ export default function App() {
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ApiAnalysisDetail | null>(null);
   const [error, setError] = useState("");
+  const [authChecked, setAuthChecked] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -2097,7 +2200,8 @@ export default function App() {
         api<ApiUser>("/api/v1/me"), api<ApiUsage>("/api/v1/usage"), api<{ items: ApiAnalysisSummary[]; total: number }>("/api/v1/analyses?page_size=50"), api<ApiPlan[]>("/api/v1/plans"), api<{ theme: string }>("/api/v1/theme"),
       ]);
       setUser(nextUser); setUsage(nextUsage); setAnalyses(history.items); setAnalysesTotal(history.total); setPlans(nextPlans); setTheme(weekly.theme); setError("");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Backend indisponível"); }
+    } catch (reason) { setUser(null); setError(reason instanceof Error ? reason.message : "Backend indisponível"); }
+    finally { setAuthChecked(true); }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -2143,6 +2247,12 @@ export default function App() {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível excluir a conta"); }
   }
 
+  async function logout() {
+    if (!user) return;
+    try { await api("/api/v1/auth/logout", { method: "POST" }, user.csrf_token); }
+    finally { setUser(null); setView("dashboard"); setError(""); }
+  }
+
   const finishAnalysis = useCallback((selected: ApiAnalysisDetail) => { setDetail(selected); setView("resultado"); loadData(); }, [loadData]);
   const failAnalysis = useCallback((message: string) => { setError(message); setView("dashboard"); loadData(); }, [loadData]);
 
@@ -2165,9 +2275,12 @@ export default function App() {
   const identity = displayIdentity(user);
   const credits = usage?.bonus_credits || 0;
 
+  if (!authChecked) return <div className="min-h-screen grid place-items-center" style={{ background: "#08070C", color: "#A78BFA" }}><RefreshCw className="animate-spin" /></div>;
+  if (!user) return <LoginView onAuthenticated={loadData} />;
+
   return (
     <div style={{ background: "transparent", minHeight: "100dvh" }}>
-      <TopNav view={view} onNav={navigate} credits={credits} initials={identity.initials} />
+      <TopNav view={view} onNav={navigate} onLogout={logout} credits={credits} initials={identity.initials} username={identity.name} />
       <main className="md:pt-16" style={{ paddingBottom: hideBottomNav ? 0 : undefined }}>
         <div className={hideBottomNav ? "" : "pb-24 md:pb-6"}>
           {error && <div role="alert" style={{ margin: "1rem", padding: ".8rem 1rem", borderRadius: "1rem", background: "#fee2e2", color: "#991b1b", fontSize: ".85rem" }}>{error}</div>}
@@ -2176,7 +2289,7 @@ export default function App() {
           {view === "resultado" && <ResultadoView onNav={navigate} detail={detail} />}
           {view === "historico" && <HistoricoView analyses={analyses} onSelect={selectAnalysis} onDelete={deleteAnalysis} onLoadMore={loadMoreAnalyses} hasMore={analyses.length < analysesTotal} />}
           {view === "planos" && <PlanosView plans={plans} usage={usage} csrfToken={user?.csrf_token || ""} />}
-          {view === "perfil" && <PerfilView onNav={navigate} user={user} usage={usage} analyses={analyses} onToggleReminders={toggleReminders} onDeleteAccount={deleteAccount} />}
+          {view === "perfil" && <PerfilView onNav={navigate} user={user} usage={usage} analyses={analyses} onToggleReminders={toggleReminders} onLogout={logout} onDeleteAccount={deleteAccount} />}
           {view === "admin" && <RealAdminView onNav={navigate} />}
         </div>
       </main>

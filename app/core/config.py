@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     test_unlock_code: str = ""
     test_admin_telegram_id: int | None = None
     premium_checkout_url: str = ""
+    ultra_premium_checkout_url: str = ""
     credits_checkout_url: str = ""
+    credits_150_checkout_url: str = ""
+    credits_270_checkout_url: str = ""
+    credits_750_checkout_url: str = ""
+    credits_1050_checkout_url: str = ""
     reminder_poll_seconds: int = Field(default=900, ge=60)
     environment: str = "development"
     frontend_url: str = "http://localhost:3000"

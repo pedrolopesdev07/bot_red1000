@@ -3,7 +3,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.api.v1.schemas import AnalysisCreate, AnalysisSummary
+from app.api.v1.schemas import AnalysisCreate, AnalysisSummary, CredentialsRequest
+from app.core.passwords import hash_password, verify_password
 from app.core.web_security import require_admin
 from app.database.models import User, UserRole
 from app.main import app
@@ -16,6 +17,19 @@ def test_analysis_payload_enforces_essay_length() -> None:
 
 def test_analysis_list_contract_never_contains_full_text() -> None:
     assert "text" not in AnalysisSummary.model_json_schema()["properties"]
+
+
+def test_passwords_are_salted_and_verifiable() -> None:
+    first = hash_password("senha-segura-123")
+    second = hash_password("senha-segura-123")
+    assert first != second
+    assert verify_password("senha-segura-123", first)
+    assert not verify_password("senha-incorreta", first)
+
+
+def test_credentials_normalize_username() -> None:
+    credentials = CredentialsRequest(username="Aluno.Teste", password="senha-segura-123")
+    assert credentials.username == "aluno.teste"
 
 
 async def test_admin_requires_role_and_mfa() -> None:

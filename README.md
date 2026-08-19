@@ -20,7 +20,7 @@ O sistema recebe a redação pela interface web, reserva créditos, coloca a ava
 | `migrations` | Migrações Alembic do PostgreSQL |
 | `tests` | Testes unitários e de contrato |
 
-> O ambiente local está temporariamente em modo de demonstração (`AUTH_DISABLED=true`): não há tela de login, todas as rotas usam um usuário local e os controles de plano/crédito ficam disponíveis no botão flutuante **Admin**. Desative essa opção antes de publicar o sistema.
+> O ambiente local usa autenticação por nome de usuário e senha. O modo de demonstração só deve ser habilitado explicitamente com `AUTH_DISABLED=true`.
 
 > A avaliação é gerada por IA, pode divergir de uma correção humana e não é uma nota oficial do ENEM.
 
@@ -56,7 +56,7 @@ O produto possui catálogo de temas persistido no banco, escolha entre tema sort
 
 1. Instale Docker Desktop com Compose v2.
 2. Crie uma chave do Gemini no Google AI Studio.
-3. Configure uma conta Resend para magic links e lembretes.
+3. Configure uma conta Resend somente se desejar enviar lembretes por e-mail.
 4. Configure produtos/preços no Stripe e o webhook, caso vá testar cobrança.
 5. Copie `.env.example` para `.env` e preencha ao menos:
 
@@ -68,12 +68,10 @@ STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_PREMIUM_PRICE_ID=
 STRIPE_CREDITS_PRICE_ID=
-DEV_AUTH_BYPASS=true
+AUTH_DISABLED=false
 ```
 
-`DEV_AUTH_BYPASS=true` mostra o magic link apenas no ambiente local. Nunca habilite essa opção em produção.
-
-O Compose injeta `DATABASE_URL`, `REDIS_URL`, `FRONTEND_URL` e o modo de demonstração nos serviços. A `SECRET_KEY` deve ser definida no `.env`; não há segredo padrão no arquivo versionado. Para um ambiente real, defina também `AUTH_DISABLED=false`, `COOKIE_SECURE=true`, `ENVIRONMENT=production` e origens públicas específicas.
+O Compose injeta `DATABASE_URL`, `REDIS_URL` e `FRONTEND_URL` nos serviços. A `SECRET_KEY` deve ser definida no `.env`; não há segredo padrão no arquivo versionado. Para um ambiente real, defina também `AUTH_DISABLED=false`, `COOKIE_SECURE=true`, `ENVIRONMENT=production` e origens públicas específicas.
 
 Execute toda a plataforma:
 

@@ -17,7 +17,7 @@ router = APIRouter(tags=["billing"])
 
 @router.post(
     "/billing/checkout", response_model=CheckoutResponse,
-    dependencies=[Depends(require_csrf), Depends(rate_limit("checkout", 10, 3600))],
+    dependencies=[Depends(require_csrf), Depends(rate_limit("checkout", 30, 60))],
 )
 async def checkout(
     payload: CheckoutRequest,
@@ -27,6 +27,18 @@ async def checkout(
     settings = get_settings()
     if payload.product == "premium" and settings.premium_checkout_url:
         return CheckoutResponse(url=settings.premium_checkout_url)
+    if payload.product == "ultra_premium" and settings.ultra_premium_checkout_url:
+        return CheckoutResponse(url=settings.ultra_premium_checkout_url)
+    credit_amount = payload.credit_amount or 150
+    if payload.product == "credits":
+        checkout_url = {
+            150: settings.credits_150_checkout_url or settings.credits_checkout_url,
+            270: settings.credits_270_checkout_url,
+            750: settings.credits_750_checkout_url,
+            1050: settings.credits_1050_checkout_url,
+        }[credit_amount]
+        if checkout_url:
+            return CheckoutResponse(url=checkout_url)
     price_id = {
         "premium": settings.stripe_premium_price_id,
         "ultra_premium": settings.stripe_ultra_premium_price_id,
@@ -36,7 +48,6 @@ async def checkout(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Checkout indisponível")
     stripe.api_key = settings.stripe_secret_key
     mode = "subscription" if payload.product in {"premium", "ultra_premium"} else "payment"
-    credit_amount = payload.credit_amount or 150
     if payload.product != "credits" and payload.credit_amount is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pacote de créditos inválido")
     if payload.product == "credits":

@@ -30,7 +30,7 @@ services:
     environment: &backend_env
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-redacao}:${POSTGRES_PASSWORD:-redacao_dev}@postgres:5432/${POSTGRES_DB:-redacao_db}
       REDIS_URL: redis://redis:6379/0
-      AUTH_DISABLED: "true"
+      AUTH_DISABLED: "false"
       DEMO_USER_EMAIL: demo@reda1000.local
       FRONTEND_URL: http://localhost:3000
       ALLOWED_ORIGINS: http://localhost:3000

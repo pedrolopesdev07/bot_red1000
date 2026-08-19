@@ -1,73 +1,71 @@
-import secrets
-from urllib.parse import quote
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-from app.api.v1.schemas import MagicLinkRequest, MagicLinkResponse, MagicLinkVerify, MessageResponse
+from app.api.v1.schemas import CredentialsRequest, MessageResponse
 from app.core.config import get_settings
-from app.core.redis import get_redis
-from app.core.web_security import WebSession, create_web_session, delete_web_session, get_web_session, rate_limit, require_csrf
+from app.core.passwords import hash_password, verify_password
+from app.core.web_security import WebSession, create_web_session, delete_web_session, rate_limit, require_csrf
 from app.database.database import SessionFactory
-from app.database.repositories.users import UserRepository
-from app.services.email import send_magic_link
+from app.database.models import Plan, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _serializer() -> URLSafeTimedSerializer:
-    secret = get_settings().secret_key
-    if len(secret) < 32:
-        raise RuntimeError("SECRET_KEY must contain at least 32 characters")
-    return URLSafeTimedSerializer(secret, salt="reda1000-magic-link")
-
-
-@router.post("/magic-link", response_model=MagicLinkResponse, dependencies=[Depends(rate_limit("login", 5, 300))])
-async def request_magic_link(payload: MagicLinkRequest) -> MagicLinkResponse:
+def _set_session_cookies(response: Response, session: WebSession) -> None:
     settings = get_settings()
-    nonce = secrets.token_urlsafe(24)
-    token = _serializer().dumps({"email": str(payload.email).casefold(), "nonce": nonce})
-    await get_redis().setex(f"magic:{nonce}", settings.magic_link_ttl_seconds, "unused")
-    link = f"{settings.frontend_url}/login/verificar?token={quote(token)}"
-    sent = await send_magic_link(str(payload.email), link)
-    debug_url = link if settings.dev_auth_bypass and not settings.is_production else None
-    if not sent and debug_url is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Envio de e-mail indisponível")
-    return MagicLinkResponse(message="Se o e-mail for válido, o link de acesso será enviado.", debug_url=debug_url)
+    response.set_cookie(
+        settings.session_cookie_name, session.id, httponly=True, secure=settings.cookie_secure,
+        samesite="lax", max_age=settings.session_ttl_seconds, path="/",
+    )
+    response.set_cookie(
+        "reda1000_csrf", session.csrf_token, httponly=False, secure=settings.cookie_secure,
+        samesite="lax", max_age=settings.session_ttl_seconds, path="/",
+    )
 
 
-@router.post("/verify", response_model=MessageResponse, dependencies=[Depends(rate_limit("verify", 10, 300))])
-async def verify_magic_link(payload: MagicLinkVerify, response: Response) -> MessageResponse:
-    settings = get_settings()
-    try:
-        data = _serializer().loads(payload.token, max_age=settings.magic_link_ttl_seconds)
-        email = str(data["email"])
-        nonce = str(data["nonce"])
-    except SignatureExpired as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Link expirado") from exc
-    except (BadSignature, KeyError, TypeError) as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Link inválido") from exc
-    if await get_redis().getdel(f"magic:{nonce}") is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Link já utilizado ou expirado")
+@router.post("/register", response_model=MessageResponse, dependencies=[Depends(rate_limit("register", 5, 300))])
+async def register(payload: CredentialsRequest, response: Response) -> MessageResponse:
     async with SessionFactory.begin() as db:
-        user = await UserRepository(db).get_or_create_by_email(email)
-    web_session = await create_web_session(user.id)
-    response.set_cookie(
-        settings.session_cookie_name, web_session.id, httponly=True, secure=settings.cookie_secure,
-        samesite="lax", max_age=settings.session_ttl_seconds, path="/"
-    )
-    response.set_cookie(
-        "reda1000_csrf", web_session.csrf_token, httponly=False, secure=settings.cookie_secure,
-        samesite="lax", max_age=settings.session_ttl_seconds, path="/"
-    )
+        existing = await db.scalar(select(User.id).where(
+            User.username == payload.username, User.password_hash.is_not(None)
+        ))
+        if existing is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Nome de usuário indisponível")
+        free = await db.scalar(select(Plan).where(Plan.name == "FREE", Plan.active.is_(True)))
+        if not free:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Plano gratuito indisponível")
+        user = User(
+            username=payload.username, password_hash=hash_password(payload.password),
+            plan_id=free.id, plan=free,
+        )
+        db.add(user)
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Nome de usuário indisponível") from exc
+        user_id = user.id
+    session = await create_web_session(user_id)
+    _set_session_cookies(response, session)
+    return MessageResponse(message="Conta criada")
+
+
+@router.post("/login", response_model=MessageResponse, dependencies=[Depends(rate_limit("login", 8, 300))])
+async def login(payload: CredentialsRequest, response: Response) -> MessageResponse:
+    async with SessionFactory() as db:
+        user = await db.scalar(select(User).where(
+            User.username == payload.username, User.password_hash.is_not(None)
+        ))
+        if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário ou senha inválidos")
+        user_id = user.id
+    session = await create_web_session(user_id)
+    _set_session_cookies(response, session)
     return MessageResponse(message="Acesso confirmado")
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(
-    response: Response,
-    session: WebSession = Depends(require_csrf),
-) -> MessageResponse:
+async def logout(response: Response, session: WebSession = Depends(require_csrf)) -> MessageResponse:
     settings = get_settings()
     await delete_web_session(session.id)
     response.delete_cookie(settings.session_cookie_name, path="/")

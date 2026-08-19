@@ -2,27 +2,26 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MessageResponse(BaseModel):
     message: str
 
 
-class MagicLinkRequest(BaseModel):
-    email: EmailStr
+class CredentialsRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_.-]+$")
+    password: str = Field(min_length=8, max_length=128)
 
-
-class MagicLinkVerify(BaseModel):
-    token: str = Field(min_length=20, max_length=2000)
-
-
-class MagicLinkResponse(MessageResponse):
-    debug_url: str | None = None
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return value.strip().casefold()
 
 
 class UserResponse(BaseModel):
     id: int
+    username: str | None
     email: str | None
     role: str
     plan: str
