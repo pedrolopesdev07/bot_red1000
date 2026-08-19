@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-redacao_db}
+      POSTGRES_USER: ${POSTGRES_USER:-redacao}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-redacao_dev}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [private]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [private]
+
+  migrate:
+    build: .
+    env_file: .env
+    environment: &backend_env
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-redacao}:${POSTGRES_PASSWORD:-redacao_dev}@postgres:5432/${POSTGRES_DB:-redacao_db}
+      REDIS_URL: redis://redis:6379/0
+      AUTH_DISABLED: "true"
+      DEMO_USER_EMAIL: demo@reda1000.local
+      FRONTEND_URL: http://localhost:3000
+      ALLOWED_ORIGINS: http://localhost:3000
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [private]
+    restart: "no"
+
+  api:
+    build: .
+    env_file: .env
+    environment: *backend_env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    networks: [private]
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    environment: *backend_env
+    command: ["arq", "app.workers.analysis.WorkerSettings"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    networks: [private]
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    env_file: .env
+    environment: *backend_env
+    command: ["arq", "app.scheduler.main.WorkerSettings"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    networks: [private]
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    environment:
+      API_BASE_URL: http://api:8000
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_started }
+    networks: [private]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  private:
