@@ -1,4 +1,6 @@
 import asyncio
+import hmac
+import logging
 import uuid
 
 import stripe
@@ -13,6 +15,39 @@ from app.database.database import SessionFactory
 from app.database.models import BillingEvent, CreditTransaction, Payment, PaymentStatus, Plan, User
 
 router = APIRouter(tags=["billing"])
+
+
+def _cakto_product(settings, data: dict) -> tuple[str, int] | None:
+    product = data.get("product") or {}
+    identifiers = {str(product.get(key) or "") for key in ("id", "short_id", "shortId")}
+    mappings = (
+        ("premium", 0, settings.cakto_premium_product_ids),
+        ("ultra_premium", 0, settings.cakto_ultra_premium_product_ids),
+        ("credits:150", 150, settings.cakto_credits_150_product_ids),
+        ("credits:270", 270, settings.cakto_credits_270_product_ids),
+        ("credits:750", 750, settings.cakto_credits_750_product_ids),
+        ("credits:1050", 1050, settings.cakto_credits_1050_product_ids),
+    )
+    for product_name, credits, configured in mappings:
+        if identifiers & settings.cakto_product_ids(configured):
+            return product_name, credits
+    return None
+
+
+async def _apply_cakto_entitlement(db, user: User, product_name: str, credits: int) -> None:
+    if credits:
+        user.bonus_credits += credits
+        db.add(CreditTransaction(
+            user_id=user.id, amount=credits, balance_after=user.bonus_credits,
+            reason="CREDIT_PURCHASE", description=f"Compra Cakto de {credits} créditos",
+        ))
+        return
+    plan_name = "ULTRA_PREMIUM" if product_name == "ultra_premium" else "PREMIUM"
+    plan = await db.scalar(select(Plan).where(Plan.name == plan_name, Plan.active.is_(True)))
+    if not plan:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Plano comprado indisponível")
+    user.plan_id, user.plan = plan.id, plan
+    user.subscription_status = "active"
 
 
 @router.post(
@@ -167,4 +202,95 @@ async def stripe_webhook(
             user = await db.scalar(select(User).where(User.stripe_customer_id == data.get("customer")))
             if user:
                 user.subscription_status = "past_due"
+    return MessageResponse(message="Evento processado")
+
+
+@router.post("/webhooks/cakto", response_model=MessageResponse)
+async def cakto_webhook(request: Request) -> MessageResponse:
+    """Process Cakto's JSON-secret webhook protocol idempotently."""
+    settings = get_settings()
+    if not settings.cakto_webhook_secret:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Webhook Cakto não configurado")
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "JSON inválido") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Payload inválido")
+    received_secret = str(payload.get("secret") or "")
+    if not hmac.compare_digest(received_secret, settings.cakto_webhook_secret):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Webhook não autorizado")
+    event_type = str(payload.get("event") or "")
+    data = payload.get("data")
+    if not event_type or not isinstance(data, dict) or not data.get("id"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Evento incompleto")
+    event_id = f"{event_type}:{data['id']}"
+    supported = {
+        "purchase_approved", "purchase_refused", "refund", "chargeback",
+        "subscription_created", "subscription_renewed",
+        "subscription_renewal_refused", "subscription_canceled",
+    }
+    if event_type not in supported:
+        return MessageResponse(message="Evento ignorado")
+
+    async with SessionFactory.begin() as db:
+        inserted = await db.scalar(
+            pg_insert(BillingEvent)
+            .values(provider="cakto", event_id=event_id, event_type=event_type,
+                    payload={"object_id": str(data["id"])})
+            .on_conflict_do_nothing(index_elements=["provider", "event_id"])
+            .returning(BillingEvent.id)
+        )
+        if inserted is None:
+            return MessageResponse(message="Evento já processado")
+
+        order_key = f"cakto:{data['id']}"
+        payment = await db.scalar(select(Payment).where(Payment.provider_session_id == order_key))
+        customer = data.get("customer") or {}
+        email = str(customer.get("email") or "").strip().casefold()
+        user = await db.scalar(select(User).where(User.email == email)) if email else None
+
+        if event_type == "purchase_approved":
+            product = _cakto_product(settings, data)
+            if not product:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Produto Cakto não mapeado")
+            if not user:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Comprador sem conta associada")
+            product_name, credits = product
+            if not payment:
+                amount_cents = round(float(data.get("baseAmount") or 0) * 100)
+                payment = Payment(
+                    id=uuid.uuid4(), user_id=user.id, provider_session_id=order_key,
+                    product=product_name, amount_cents=max(0, amount_cents), status=PaymentStatus.PAID,
+                )
+                db.add(payment)
+                await _apply_cakto_entitlement(db, user, product_name, credits)
+        elif event_type in {"refund", "chargeback"}:
+            if payment and payment.status != PaymentStatus.REFUNDED:
+                payment.status = PaymentStatus.REFUNDED
+                owner = await db.get(User, payment.user_id)
+                if payment.product.startswith("credits:"):
+                    credits = int(payment.product.partition(":")[2])
+                    deducted = min(credits, owner.bonus_credits)
+                    owner.bonus_credits -= deducted
+                    db.add(CreditTransaction(
+                        user_id=owner.id, amount=-deducted, balance_after=owner.bonus_credits,
+                        reason="CREDIT_REFUND", description=f"Estorno Cakto de {credits} créditos",
+                        payment_id=payment.id,
+                    ))
+                else:
+                    free = await db.scalar(select(Plan).where(Plan.name == "FREE"))
+                    owner.plan_id, owner.plan = free.id, free
+                    owner.subscription_status = "refunded"
+        elif event_type in {"subscription_canceled", "subscription_renewal_refused"} and user:
+            free = await db.scalar(select(Plan).where(Plan.name == "FREE"))
+            user.plan_id, user.plan = free.id, free
+            user.subscription_status = "canceled" if event_type == "subscription_canceled" else "past_due"
+        elif event_type in {"subscription_created", "subscription_renewed"} and user:
+            product = _cakto_product(settings, data)
+            if product and not product[1]:
+                await _apply_cakto_entitlement(db, user, product[0], 0)
+    logging.getLogger(__name__).info(
+        "cakto_event_processed", extra={"event_type": event_type, "event_id": str(data["id"])}
+    )
     return MessageResponse(message="Evento processado")

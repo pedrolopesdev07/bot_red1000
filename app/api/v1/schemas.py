@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class MessageResponse(BaseModel):
@@ -12,11 +12,21 @@ class MessageResponse(BaseModel):
 class CredentialsRequest(BaseModel):
     username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_.-]+$")
     password: str = Field(min_length=8, max_length=128)
+    mfa_code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
     @field_validator("username")
     @classmethod
     def normalize_username(cls, value: str) -> str:
         return value.strip().casefold()
+
+
+class RegistrationRequest(CredentialsRequest):
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).strip().casefold()
 
 
 class UserResponse(BaseModel):

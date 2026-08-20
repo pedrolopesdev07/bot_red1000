@@ -58,6 +58,15 @@ async def update_demo_controls(
         row.updated_at = datetime.now(timezone.utc) - timedelta(hours=24) + timedelta(minutes=payload.renewal_minutes)
     await db.commit()
     await db.refresh(admin)
+    logger.warning(
+        "admin_demo_controls_changed",
+        extra={
+            "admin_user_id": admin.id,
+            "changed_plan": payload.plan,
+            "changed_bonus_credits": payload.bonus_credits is not None,
+            "changed_usage": payload.used is not None or payload.reset_usage,
+        },
+    )
     current = await UsageLimiter(db).status(admin)
     return DemoControlsResponse(
         plan=admin.plan.name, bonus_credits=admin.bonus_credits, used=current.used,

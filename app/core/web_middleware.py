@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.redis import get_redis
+from app.core.web_security import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                     return JSONResponse({"detail": "Requisição muito grande"}, status_code=413)
             except ValueError:
                 return JSONResponse({"detail": "Content-Length inválido"}, status_code=400)
-        if request.url.path != "/health":
-            client_ip = request.client.host if request.client else "unknown"
+        if request.url.path not in {"/health", "/openapi.json", "/docs", "/redoc"}:
+            client_ip = get_client_ip(request)
             bucket = int(time.time()) // 60
             key = f"rate:global:{client_ip}:{bucket}"
             count = await get_redis().incr(key)

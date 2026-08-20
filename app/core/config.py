@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     credits_270_checkout_url: str = ""
     credits_750_checkout_url: str = ""
     credits_1050_checkout_url: str = ""
+    cakto_webhook_secret: str = ""
+    cakto_premium_product_ids: str = ""
+    cakto_ultra_premium_product_ids: str = ""
+    cakto_credits_150_product_ids: str = ""
+    cakto_credits_270_product_ids: str = ""
+    cakto_credits_750_product_ids: str = ""
+    cakto_credits_1050_product_ids: str = ""
     reminder_poll_seconds: int = Field(default=900, ge=60)
     environment: str = "development"
     frontend_url: str = "http://localhost:3000"
@@ -35,6 +42,7 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=43_200, ge=300)
     magic_link_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     cookie_secure: bool = False
+    cookie_samesite: str = "none"
     dev_auth_bypass: bool = False
     auth_disabled: bool = True
     demo_user_email: str = "demo@reda1000.local"
@@ -49,6 +57,7 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=10, ge=1, le=100)
     enable_telegram_bot: bool = False
     admin_allowed_ips: str = ""
+    admin_totp_secret: str = ""
     max_request_body_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
     global_rate_limit: int = Field(default=300, ge=10, le=10_000)
     login_lockout_attempts: int = Field(default=5, ge=3, le=20)
@@ -63,13 +72,30 @@ class Settings(BaseSettings):
         return self.environment.casefold() == "production"
 
     @property
+    def session_same_site(self) -> str:
+        if not self.cookie_secure:
+            return "lax"
+        return self.cookie_samesite.casefold()
+
+    @property
     def admin_ip_allowlist(self) -> set[str]:
         return {ip.strip() for ip in self.admin_allowed_ips.split(",") if ip.strip()}
+
+    def cakto_product_ids(self, value: str) -> set[str]:
+        return {item.strip() for item in value.split(",") if item.strip()}
 
     @field_validator("test_admin_telegram_id", mode="before")
     @classmethod
     def empty_admin_id_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("cookie_samesite")
+    @classmethod
+    def valid_cookie_samesite(cls, value: str) -> str:
+        normalized = value.casefold().strip()
+        if normalized not in {"lax", "strict", "none"}:
+            raise ValueError("COOKIE_SAMESITE deve ser lax, strict ou none")
+        return normalized
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

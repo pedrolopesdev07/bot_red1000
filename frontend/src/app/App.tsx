@@ -660,8 +660,10 @@ function BottomNav({ view, onNav }: { view: View; onNav: (v: View) => void }) {
 function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [backendStatus, setBackendStatus] = useState<"idle" | "waking" | "ready" | "error">("idle");
@@ -707,7 +709,7 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
       const backendReady = await wakeBackend();
       if (!backendReady) throw new Error("Não foi possível iniciar o servidor. Tente novamente.");
       await api(`/api/v1/auth/${mode === "login" ? "login" : "register"}`, {
-        method: "POST", body: JSON.stringify({ username, password }),
+        method: "POST", body: JSON.stringify({ username, password, ...(mode === "register" ? { email } : {}), ...(mode === "login" && mfaCode ? { mfa_code: mfaCode } : {}) }),
       });
       await onAuthenticated();
     } catch (reason) {
@@ -726,11 +728,21 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
         <p className="auth-subtitle" style={{ color: "#9D94AC", marginTop: 8 }}>{mode === "login" ? "Entre na sua conta" : "Crie sua conta gratuita"}</p>
       </div>
       <form onSubmit={handleCredentials} className="auth-card flex flex-col gap-4 p-5 rounded-2xl" style={{ background: "#100D18", border: "1px solid rgba(139,92,246,.2)" }}>
+        {mode === "register" && <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>E-mail
+          <div className="relative mt-1.5"><Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
+            <input type="email" autoComplete="email" required maxLength={320} value={email} onFocus={wakeBackend} onChange={(e) => setEmail(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="voce@email.com" />
+          </div>
+        </label>}
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Nome de usuário
           <div className="relative mt-1.5"><User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
             <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.\-]+" value={username} onFocus={wakeBackend} onChange={(e) => { setUsername(e.target.value); wakeBackend(); }} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
           </div>
         </label>
+        {mode === "login" && <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Código de segurança <span style={{ fontWeight: 400 }}>(somente administrador)</span>
+          <div className="relative mt-1.5"><Shield size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
+            <input inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={6} pattern="[0-9]{6}" value={mfaCode} onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="000000" />
+          </div>
+        </label>}
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Senha
           <div className="relative mt-1.5"><Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
             <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} maxLength={128} value={password} onFocus={wakeBackend} onChange={(e) => { setPassword(e.target.value); wakeBackend(); }} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Mínimo de 8 caracteres" />
@@ -747,7 +759,7 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
         <button disabled={loading} className="auth-submit w-full py-3 rounded-xl flex justify-center gap-2" style={{ color: "#fff", fontWeight: 700, background: "linear-gradient(135deg,#5B21B6,#8B5CF6)", opacity: loading ? .7 : 1 }}>
           {loading ? <RefreshCw size={17} className="animate-spin" /> : mode === "login" ? "Entrar" : "Criar conta"}
         </button>
-        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setPasswordConfirmation(""); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
+        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setEmail(""); setPasswordConfirmation(""); setMfaCode(""); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
           {mode === "login" ? "Ainda não tenho conta" : "Já tenho uma conta"}
         </button>
       </form>

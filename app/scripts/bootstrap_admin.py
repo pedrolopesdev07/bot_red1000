@@ -11,8 +11,10 @@ from app.database.models import Plan, User, UserRole
 async def main() -> None:
     username = os.environ.get("ADMIN_USERNAME", "").strip().casefold()
     password = os.environ.get("ADMIN_PASSWORD", "")
-    if not username or len(password) < 8:
-        raise RuntimeError("ADMIN_USERNAME e ADMIN_PASSWORD (mínimo de 8 caracteres) são obrigatórios")
+    if not username or len(password) < 14:
+        raise RuntimeError("ADMIN_USERNAME e ADMIN_PASSWORD (mínimo de 14 caracteres) são obrigatórios")
+    if not os.environ.get("ADMIN_TOTP_SECRET", "").strip():
+        raise RuntimeError("ADMIN_TOTP_SECRET é obrigatório para o administrador")
 
     async with SessionFactory.begin() as db:
         plan = await db.scalar(select(Plan).where(Plan.name == "ULTRA_PREMIUM"))

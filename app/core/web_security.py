@@ -15,6 +15,17 @@ from app.database.database import get_session
 from app.database.models import Plan, User, UserRole
 
 
+def get_client_ip(request: Request) -> str:
+    """Use Render's first forwarded hop in production; fall back locally."""
+    settings = get_settings()
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if settings.is_production and forwarded:
+        candidate = forwarded.split(",", 1)[0].strip()
+        if candidate:
+            return candidate
+    return request.client.host if request.client else "unknown"
+
+
 @dataclass(frozen=True)
 class WebSession:
     id: str
@@ -123,14 +134,14 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 async def require_admin_ip(request: Request) -> None:
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     if client_ip not in get_settings().admin_ip_allowlist:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Acesso administrativo indisponível neste endereço")
 
 
 def rate_limit(scope: str, limit: int, window_seconds: int):
     async def dependency(request: Request) -> None:
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = get_client_ip(request)
         session_id = request.cookies.get(get_settings().session_cookie_name, "anonymous")
         actor = hashlib.sha256(f"{client_ip}:{session_id}".encode()).hexdigest()[:24]
         bucket = int(time.time()) // window_seconds

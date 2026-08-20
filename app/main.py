@@ -54,7 +54,20 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled_request_error", extra={"correlation_id": getattr(request.state, "correlation_id", None), "path": request.url.path})
-    return JSONResponse(status_code=500, content={"detail": "Erro interno", "request_id": getattr(request.state, "correlation_id", None)})
+    headers = {
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+    }
+    origin = request.headers.get("origin")
+    if origin in settings.cors_origins:
+        headers.update({
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true", "Vary": "Origin",
+        })
+    return JSONResponse(
+        status_code=500, headers=headers,
+        content={"detail": "Erro interno", "request_id": getattr(request.state, "correlation_id", None)},
+    )
 
 app.include_router(health_router)
 app.include_router(api_v1_router)

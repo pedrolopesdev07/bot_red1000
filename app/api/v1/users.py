@@ -39,7 +39,7 @@ async def update_me(
 async def logout_all(response: Response, user: User = Depends(get_current_user)) -> MessageResponse:
     await delete_all_user_sessions(user.id)
     settings = get_settings()
-    same_site = "none" if settings.cookie_secure else "lax"
+    same_site = settings.session_same_site
     response.delete_cookie(
         settings.session_cookie_name, path="/", secure=settings.cookie_secure, samesite=same_site
     )
@@ -63,7 +63,7 @@ async def delete_account(
     await db.commit()
     await delete_all_user_sessions(user.id)
     settings = get_settings()
-    same_site = "none" if settings.cookie_secure else "lax"
+    same_site = settings.session_same_site
     response.delete_cookie(
         settings.session_cookie_name, path="/", secure=settings.cookie_secure, samesite=same_site
     )
