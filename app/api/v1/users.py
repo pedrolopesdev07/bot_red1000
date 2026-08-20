@@ -39,8 +39,13 @@ async def update_me(
 async def logout_all(response: Response, user: User = Depends(get_current_user)) -> MessageResponse:
     await delete_all_user_sessions(user.id)
     settings = get_settings()
-    response.delete_cookie(settings.session_cookie_name, path="/")
-    response.delete_cookie("reda1000_csrf", path="/")
+    same_site = "none" if settings.cookie_secure else "lax"
+    response.delete_cookie(
+        settings.session_cookie_name, path="/", secure=settings.cookie_secure, samesite=same_site
+    )
+    response.delete_cookie(
+        "reda1000_csrf", path="/", secure=settings.cookie_secure, samesite=same_site
+    )
     return MessageResponse(message="Todas as sessões foram encerradas")
 
 
@@ -58,6 +63,11 @@ async def delete_account(
     await db.commit()
     await delete_all_user_sessions(user.id)
     settings = get_settings()
-    response.delete_cookie(settings.session_cookie_name, path="/")
-    response.delete_cookie("reda1000_csrf", path="/")
+    same_site = "none" if settings.cookie_secure else "lax"
+    response.delete_cookie(
+        settings.session_cookie_name, path="/", secure=settings.cookie_secure, samesite=same_site
+    )
+    response.delete_cookie(
+        "reda1000_csrf", path="/", secure=settings.cookie_secure, samesite=same_site
+    )
     return MessageResponse(message="Conta e dados pessoais excluídos")

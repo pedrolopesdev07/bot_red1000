@@ -15,13 +15,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _set_session_cookies(response: Response, session: WebSession) -> None:
     settings = get_settings()
+    same_site = "none" if settings.cookie_secure else "lax"
     response.set_cookie(
         settings.session_cookie_name, session.id, httponly=True, secure=settings.cookie_secure,
-        samesite="lax", max_age=settings.session_ttl_seconds, path="/",
+        samesite=same_site, max_age=settings.session_ttl_seconds, path="/",
     )
     response.set_cookie(
         "reda1000_csrf", session.csrf_token, httponly=False, secure=settings.cookie_secure,
-        samesite="lax", max_age=settings.session_ttl_seconds, path="/",
+        samesite=same_site, max_age=settings.session_ttl_seconds, path="/",
     )
 
 
@@ -81,6 +82,11 @@ async def login(payload: CredentialsRequest, response: Response, request: Reques
 async def logout(response: Response, session: WebSession = Depends(require_csrf)) -> MessageResponse:
     settings = get_settings()
     await delete_web_session(session.id)
-    response.delete_cookie(settings.session_cookie_name, path="/")
-    response.delete_cookie("reda1000_csrf", path="/")
+    same_site = "none" if settings.cookie_secure else "lax"
+    response.delete_cookie(
+        settings.session_cookie_name, path="/", secure=settings.cookie_secure, samesite=same_site
+    )
+    response.delete_cookie(
+        "reda1000_csrf", path="/", secure=settings.cookie_secure, samesite=same_site
+    )
     return MessageResponse(message="Sessão encerrada")
