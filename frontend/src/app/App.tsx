@@ -664,6 +664,37 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [backendStatus, setBackendStatus] = useState<"idle" | "waking" | "ready" | "error">("idle");
+  const wakeRequest = useRef<Promise<boolean> | null>(null);
+  const wakeMessageTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (wakeMessageTimer.current !== null) window.clearTimeout(wakeMessageTimer.current);
+  }, []);
+
+  const wakeBackend = useCallback(() => {
+    if (wakeRequest.current) return wakeRequest.current;
+
+    // Avoid flashing the notice when the backend is already awake.
+    wakeMessageTimer.current = window.setTimeout(() => setBackendStatus("waking"), 1200);
+    wakeRequest.current = fetch(`${API_URL}/health`, { credentials: "include" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Health check failed with ${response.status}`);
+        setBackendStatus("ready");
+        return true;
+      })
+      .catch(() => {
+        setBackendStatus("error");
+        wakeRequest.current = null;
+        return false;
+      })
+      .finally(() => {
+        if (wakeMessageTimer.current !== null) window.clearTimeout(wakeMessageTimer.current);
+        wakeMessageTimer.current = null;
+      });
+
+    return wakeRequest.current;
+  }, []);
 
   async function handleCredentials(e: FormEvent) {
     e.preventDefault();
@@ -673,6 +704,8 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
     }
     try {
       setLoading(true); setMessage("");
+      const backendReady = await wakeBackend();
+      if (!backendReady) throw new Error("Não foi possível iniciar o servidor. Tente novamente.");
       await api(`/api/v1/auth/${mode === "login" ? "login" : "register"}`, {
         method: "POST", body: JSON.stringify({ username, password }),
       });
@@ -695,12 +728,12 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
       <form onSubmit={handleCredentials} className="auth-card flex flex-col gap-4 p-5 rounded-2xl" style={{ background: "#100D18", border: "1px solid rgba(139,92,246,.2)" }}>
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Nome de usuário
           <div className="relative mt-1.5"><User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
-            <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.\-]+" value={username} onChange={(e) => setUsername(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
+            <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.\-]+" value={username} onFocus={wakeBackend} onChange={(e) => { setUsername(e.target.value); wakeBackend(); }} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
           </div>
         </label>
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Senha
           <div className="relative mt-1.5"><Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
-            <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Mínimo de 8 caracteres" />
+            <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} maxLength={128} value={password} onFocus={wakeBackend} onChange={(e) => { setPassword(e.target.value); wakeBackend(); }} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Mínimo de 8 caracteres" />
           </div>
         </label>
         {mode === "register" && <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Confirmar senha
@@ -708,6 +741,8 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
             <input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={passwordConfirmation} onChange={(e) => setPasswordConfirmation(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Digite a senha novamente" />
           </div>
         </label>}
+        {backendStatus === "waking" && <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-xl p-3" style={{ color: "#5B21B6", background: "#F3E8FF", fontSize: ".82rem" }}><RefreshCw size={18} className="animate-spin shrink-0" /><span><strong>Eita! Muita gente está fazendo redação agora.</strong><br />Será que você consegue uma nota melhor que eles? 👀</span></div>}
+        {backendStatus === "error" && <div role="alert" className="rounded-xl p-3" style={{ color: "#991B1B", background: "#FEE2E2", fontSize: ".82rem" }}><strong>O servidor não respondeu.</strong><br />Clique em Entrar para tentar acordá-lo novamente.</div>}
         {message && <p role="alert" style={{ color: "#F87171", fontSize: ".82rem" }}>{message}</p>}
         <button disabled={loading} className="auth-submit w-full py-3 rounded-xl flex justify-center gap-2" style={{ color: "#fff", fontWeight: 700, background: "linear-gradient(135deg,#5B21B6,#8B5CF6)", opacity: loading ? .7 : 1 }}>
           {loading ? <RefreshCw size={17} className="animate-spin" /> : mode === "login" ? "Entrar" : "Criar conta"}
