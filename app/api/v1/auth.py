@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -6,8 +6,9 @@ from app.api.v1.schemas import CredentialsRequest, MessageResponse
 from app.core.config import get_settings
 from app.core.passwords import hash_password, verify_password
 from app.core.web_security import WebSession, create_web_session, delete_web_session, rate_limit, require_csrf
+from app.core.redis import get_redis
 from app.database.database import SessionFactory
-from app.database.models import Plan, User
+from app.database.models import Plan, User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -51,14 +52,26 @@ async def register(payload: CredentialsRequest, response: Response) -> MessageRe
 
 
 @router.post("/login", response_model=MessageResponse, dependencies=[Depends(rate_limit("login", 8, 300))])
-async def login(payload: CredentialsRequest, response: Response) -> MessageResponse:
+async def login(payload: CredentialsRequest, response: Response, request: Request) -> MessageResponse:
+    settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    lock_key = f"login_lock:{client_ip}:{payload.username}"
+    failures = int(await get_redis().get(lock_key) or 0)
+    if failures >= settings.login_lockout_attempts:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Conta temporariamente bloqueada; tente novamente mais tarde")
     async with SessionFactory() as db:
         user = await db.scalar(select(User).where(
             User.username == payload.username, User.password_hash.is_not(None)
         ))
         if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
+            failures = await get_redis().incr(lock_key)
+            if failures == 1:
+                await get_redis().expire(lock_key, settings.login_lockout_seconds)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário ou senha inválidos")
+        if user.role is UserRole.ADMIN and client_ip not in settings.admin_ip_allowlist:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Acesso administrativo indisponível neste endereço")
         user_id = user.id
+    await get_redis().delete(lock_key)
     session = await create_web_session(user_id)
     _set_session_cookies(response, session)
     return MessageResponse(message="Acesso confirmado")

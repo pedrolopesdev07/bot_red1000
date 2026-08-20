@@ -122,6 +122,12 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+async def require_admin_ip(request: Request) -> None:
+    client_ip = request.client.host if request.client else "unknown"
+    if client_ip not in get_settings().admin_ip_allowlist:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Acesso administrativo indisponível neste endereço")
+
+
 def rate_limit(scope: str, limit: int, window_seconds: int):
     async def dependency(request: Request) -> None:
         client_ip = request.client.host if request.client else "unknown"

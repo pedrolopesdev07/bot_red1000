@@ -21,6 +21,7 @@ class CredentialsRequest(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
+    created_at: datetime
     username: str | None
     email: str | None
     role: str

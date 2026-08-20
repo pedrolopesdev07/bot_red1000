@@ -12,6 +12,7 @@ services:
       timeout: 5s
       retries: 10
     networks: [private]
+    security_opt: [no-new-privileges:true]
 
   redis:
     image: redis:7-alpine
@@ -23,6 +24,7 @@ services:
       timeout: 3s
       retries: 10
     networks: [private]
+    security_opt: [no-new-privileges:true]
 
   migrate:
     build: .
@@ -34,6 +36,7 @@ services:
       DEMO_USER_EMAIL: demo@reda1000.local
       FRONTEND_URL: http://localhost:3000
       ALLOWED_ORIGINS: http://localhost:3000
+      ADMIN_ALLOWED_IPS: 172.18.0.1
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -46,6 +49,10 @@ services:
     environment: *backend_env
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["8000:8000"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -61,6 +68,10 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     networks: [private]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     restart: unless-stopped
 
   scheduler:
@@ -72,17 +83,25 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     networks: [private]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     restart: unless-stopped
 
   frontend:
     build: ./frontend
     environment:
       API_BASE_URL: http://api:8000
-    ports: ["3000:3000"]
+    ports: ["3000:8080"]
     depends_on:
       api: { condition: service_started }
     networks: [private]
     restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
 
 volumes:
   postgres_data:

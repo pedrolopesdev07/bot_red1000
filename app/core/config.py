@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     data_retention_days: int = Field(default=365, ge=1)
     database_pool_size: int = Field(default=10, ge=1, le=100)
     enable_telegram_bot: bool = False
+    admin_allowed_ips: str = ""
+    max_request_body_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
+    global_rate_limit: int = Field(default=300, ge=10, le=10_000)
+    login_lockout_attempts: int = Field(default=5, ge=3, le=20)
+    login_lockout_seconds: int = Field(default=900, ge=60, le=86_400)
 
     @property
     def cors_origins(self) -> list[str]:
@@ -57,10 +62,27 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment.casefold() == "production"
 
+    @property
+    def admin_ip_allowlist(self) -> set[str]:
+        return {ip.strip() for ip in self.admin_allowed_ips.split(",") if ip.strip()}
+
     @field_validator("test_admin_telegram_id", mode="before")
     @classmethod
     def empty_admin_id_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        if self.is_production:
+            if self.auth_disabled:
+                raise ValueError("AUTH_DISABLED deve ser false em produção")
+            if not self.cookie_secure:
+                raise ValueError("COOKIE_SECURE deve ser true em produção")
+            if len(self.secret_key) < 32:
+                raise ValueError("SECRET_KEY deve ter ao menos 32 caracteres em produção")
+            if any(origin.startswith("http://") for origin in self.cors_origins):
+                raise ValueError("ALLOWED_ORIGINS deve usar HTTPS em produção")
+        return self
 
 @lru_cache
 def get_settings() -> Settings:

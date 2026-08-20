@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.api.v1.schemas import AnalysisCreate, AnalysisSummary, CredentialsRequest
 from app.core.passwords import hash_password, verify_password
+from app.core.config import Settings
 from app.core.web_security import require_admin
 from app.database.models import User, UserRole
 from app.main import app
@@ -48,3 +49,18 @@ def test_api_exposes_versioned_routes_and_security_headers() -> None:
     assert response.status_code == 200
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+def test_production_rejects_insecure_configuration() -> None:
+    with pytest.raises(ValidationError):
+        Settings(environment="production", auth_disabled=True, cookie_secure=False)
+
+
+def test_production_accepts_secure_configuration() -> None:
+    settings = Settings(
+        environment="production", auth_disabled=False, cookie_secure=True,
+        secret_key="x" * 32, allowed_origins="https://reda1000.example",
+    )
+    assert settings.is_production

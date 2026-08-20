@@ -42,7 +42,7 @@ interface Competencia {
   evidencias: Evidencia[];
 }
 
-interface ApiUser { id: number; username: string | null; email: string | null; role: string; plan: string; bonus_credits: number; reminders_enabled: boolean; csrf_token: string; subscription_status: string }
+interface ApiUser { id: number; created_at: string; username: string | null; email: string | null; role: string; plan: string; bonus_credits: number; reminders_enabled: boolean; csrf_token: string; subscription_status: string }
 interface ApiUsage { plan: string; limit: number | string; used: number; remaining: number | string; next_credit_at: string | null; bonus_credits: number }
 interface ApiAnalysisSummary { id: string; status: string; created_at: string; completed_at: string | null; total_score: number | null; summary: string | null }
 interface ApiAnalysisDetail extends ApiAnalysisSummary { text: string | null; competency_scores: Array<number | null>; feedback: Record<string, any> | null; detailed_feedback: boolean; topic: string | null }
@@ -71,21 +71,33 @@ function displayIdentity(user: ApiUser | null) {
   return { name, email, initials };
 }
 
-function dailyRanking(currentScore: number | null, completedCount: number) {
-  const day = Math.floor(Date.now() / 86_400_000);
+function dailyRanking(analyses: ApiAnalysis[], accountCreatedAt: string, now = Date.now()) {
+  const cycleDuration = 7 * 86_400_000;
+  const createdAt = new Date(accountCreatedAt).getTime();
+  const validCreatedAt = Number.isFinite(createdAt) ? createdAt : now;
+  const cycleNumber = Math.max(0, Math.floor((now - validCreatedAt) / cycleDuration));
+  const cycleStart = validCreatedAt + cycleNumber * cycleDuration;
+  const cycleEndsAt = cycleStart + cycleDuration;
+  const day = Math.floor(cycleStart / 86_400_000);
   const pool = ["Lara M.", "Rafael S.", "Bia Costa", "Lucas P.", "Ana Clara", "João V.", "Cecília R.", "Davi N.", "Yasmin A.", "Pedro H.", "Luiza F.", "Caio T."];
   const seeded = pool.map((name, index) => ({ name, key: Math.sin((day + 1) * 9301 + index * 49297) }));
   const names = seeded.sort((a, b) => a.key - b.key).slice(0, 7).map((item) => item.name);
   const leaders = names.slice(0, 3).map((name, index) => ({
-    name, pos: index + 1, score: 1000 - index * 20, essays: 96 - index * 13 + Math.abs((day + index * 5) % 8), current: false,
+    name, pos: index + 1, score: 347 - index * 47 + Math.abs((day + index * 5) % 11), essays: 24 - index * 3 + Math.abs((day + index * 5) % 4), current: false,
   }));
   const others = names.slice(3).map((name, index) => ({
-    name, pos: index + 4, score: 950 - index * 20, essays: 58 - index * 7 + Math.abs((day + index * 3) % 6), current: false,
+    name, pos: index + 4, score: 193 - index * 31 + Math.abs((day + index * 3) % 13), essays: 14 - index * 2 + Math.abs((day + index * 3) % 3), current: false,
   }));
-  const activityGain = Math.min(700, completedCount * 22 + Math.round((currentScore ?? 0) / 20));
-  const dailyOffset = Math.abs((day * 137) % 900);
-  const user = { name: "Você", pos: Math.max(7600, 9950 - activityGain - dailyOffset), score: currentScore ?? 0, essays: completedCount, current: true };
-  return { leaders, others, user };
+  const completed = analyses.filter((item) => item.status === "COMPLETED" && item.total_score !== null && new Date(item.created_at).getTime() >= cycleStart);
+  const activeDays = new Set(completed.map((item) => new Date(item.created_at).toISOString().slice(0, 10))).size;
+  const rankingScore = activeDays >= 7
+    ? Math.max(0, completed.reduce((total, item) => total + (Number(item.total_score) === 1000 ? 15 : Number(item.total_score) < 600 ? -30 : 0), 0))
+    : 0;
+  const activityGain = Math.floor(rankingScore / 15) * 45;
+  const startingPosition = 1100 + Math.abs((day * 137) % 401);
+  const userPosition = Math.max(800, Math.min(1500, startingPosition - activityGain));
+  const user = { name: "Você", pos: userPosition, score: rankingScore, essays: completed.length, current: true };
+  return { leaders, others, user, activeDays, cycleEndsAt };
 }
 
 function detailCompetencies(detail: ApiAnalysisDetail | null): Competencia[] {
@@ -301,9 +313,18 @@ const PROCESSING_STEPS = [
 
 const HOME_CAROUSEL = [
   "A nota que você quer começa no rascunho que você ainda não escreveu.",
+  "Treine nesta semana e dispute 3 meses de Netflix + 1 mês de CapCut Pro!",
   "Quem treina hoje chega à prova com argumento, repertório e confiança.",
+  "Chegue ao 2º lugar e ganhe 3 meses de Disney+.",
   "Texto perfeito não nasce pronto. Nasce escrito, corrigido e reescrito.",
+  "O 3º lugar da semana leva 1 mês de Crunchyroll.",
   "O top 10 não espera inspiração: escreva, envie e melhore toda semana.",
+];
+
+const RANKING_PRIZES = [
+  { place: "1º lugar", title: "Netflix + CapCut Pro", detail: "3 meses de Netflix + 1 mês de CapCut Pro", medal: "🥇", logos: [{ name: "Netflix", kind: "netflix", mark: "N" }, { name: "CapCut Pro", kind: "capcut", mark: "✂" }] },
+  { place: "2º lugar", title: "Disney+", detail: "3 meses de Disney+", medal: "🥈", logos: [{ name: "Disney+", kind: "disney", mark: "Disney+" }] },
+  { place: "3º lugar", title: "Crunchyroll", detail: "1 mês de Crunchyroll", medal: "🥉", logos: [{ name: "Crunchyroll", kind: "crunchyroll", mark: "◉" }] },
 ];
 
 const HOME_MILESTONES = [
@@ -640,11 +661,16 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
   async function handleCredentials(e: FormEvent) {
     e.preventDefault();
+    if (mode === "register" && password !== passwordConfirmation) {
+      setMessage("As senhas não coincidem");
+      return;
+    }
     try {
       setLoading(true); setMessage("");
       await api(`/api/v1/auth/${mode === "login" ? "login" : "register"}`, {
@@ -669,7 +695,7 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
       <form onSubmit={handleCredentials} className="auth-card flex flex-col gap-4 p-5 rounded-2xl" style={{ background: "#100D18", border: "1px solid rgba(139,92,246,.2)" }}>
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Nome de usuário
           <div className="relative mt-1.5"><User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
-            <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.-]+" value={username} onChange={(e) => setUsername(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
+            <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.\-]+" value={username} onChange={(e) => setUsername(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
           </div>
         </label>
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Senha
@@ -677,11 +703,16 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
             <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Mínimo de 8 caracteres" />
           </div>
         </label>
+        {mode === "register" && <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Confirmar senha
+          <div className="relative mt-1.5"><Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
+            <input type="password" autoComplete="new-password" required minLength={8} maxLength={128} value={passwordConfirmation} onChange={(e) => setPasswordConfirmation(e.target.value)} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Digite a senha novamente" />
+          </div>
+        </label>}
         {message && <p role="alert" style={{ color: "#F87171", fontSize: ".82rem" }}>{message}</p>}
         <button disabled={loading} className="auth-submit w-full py-3 rounded-xl flex justify-center gap-2" style={{ color: "#fff", fontWeight: 700, background: "linear-gradient(135deg,#5B21B6,#8B5CF6)", opacity: loading ? .7 : 1 }}>
           {loading ? <RefreshCw size={17} className="animate-spin" /> : mode === "login" ? "Entrar" : "Criar conta"}
         </button>
-        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
+        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setPasswordConfirmation(""); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
           {mode === "login" ? "Ainda não tenho conta" : "Já tenho uma conta"}
         </button>
       </form>
@@ -995,7 +1026,7 @@ function DashboardV2({ onNav }: { onNav: (v: View) => void }) {
             <div className="home-ranking-list">
               {ranking.map((item) => (
                 <div key={item.pos} className={`home-ranking-row ${item.current ? "is-current" : ""}`}>
-                  <span className="home-position">#{item.pos}</span>
+                  <span className="home-position">{item.pos}º</span>
                   <span className="home-rank-avatar">{item.name[0]}</span>
                   <span className="home-rank-name">{item.name}{item.current && " (você)"}</span>
                   <strong>{item.score}</strong>
@@ -1040,12 +1071,15 @@ function DashboardV2({ onNav }: { onNav: (v: View) => void }) {
   );
 }
 
-function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis }: { onNav: (v: View) => void; usage: ApiUsage | null; analyses: ApiAnalysisSummary[]; theme: string; onSubmit: (text: string, topicId: number | null, customTopic: string | null) => Promise<void>; onSelectAnalysis: (id: string) => void }) {
+function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit, onSelectAnalysis }: { onNav: (v: View) => void; usage: ApiUsage | null; analyses: ApiAnalysisSummary[]; theme: string; accountCreatedAt: string; onSubmit: (text: string, topicId: number | null, customTopic: string | null) => Promise<void>; onSelectAnalysis: (id: string) => void }) {
   const [homeText, setHomeText] = useState("");
   const [messageIndex, setMessageIndex] = useState(0);
+  const [rankingNow, setRankingNow] = useState(Date.now());
   const [writingMode, setWritingMode] = useState<"write" | "paste">("write");
   const [topicMode, setTopicMode] = useState<"choose" | "random">("choose");
   const [customTopic, setCustomTopic] = useState("");
+  const [topicError, setTopicError] = useState(false);
+  const topicInputRef = useRef<HTMLInputElement>(null);
   const [randomTopic, setRandomTopic] = useState<{ id: number | null; title: string; category: string } | null>(null);
   const selectedTopic = topicMode === "choose"
     ? { titulo: customTopic.trim(), prazo: "Livre", area: "Tema personalizado" }
@@ -1056,13 +1090,22 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
   const unlockedMilestones = HOME_MILESTONES.filter((item) => charCount >= item.min).length;
   const completed = analyses.filter((item) => item.status === "COMPLETED" && item.total_score !== null);
   const average = completed.length ? Math.round(completed.reduce((sum, item) => sum + Number(item.total_score), 0) / completed.length) : 0;
-  const ranking = dailyRanking(completed[0]?.total_score ?? null, completed.length);
+  const ranking = dailyRanking(analyses, accountCreatedAt, rankingNow);
+  const countdownSeconds = Math.max(0, Math.ceil((ranking.cycleEndsAt - rankingNow) / 1000));
+  const countdownDays = Math.floor(countdownSeconds / 86400);
+  const countdownHours = Math.floor((countdownSeconds % 86400) / 3600);
+  const countdownMinutes = Math.floor((countdownSeconds % 3600) / 60);
+  const countdownRemainingSeconds = countdownSeconds % 60;
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setMessageIndex((current) => (current + 1) % HOME_CAROUSEL.length);
     }, 7000);
 
     return () => window.clearInterval(intervalId);
+  }, []);
+  useEffect(() => {
+    const timerId = window.setInterval(() => setRankingNow(Date.now()), 1000);
+    return () => window.clearInterval(timerId);
   }, []);
 
   function focusWritingArea() {
@@ -1074,6 +1117,7 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
   }
 
   async function drawRandomTopic() {
+    setTopicError(false);
     setTopicMode("random");
     try {
       const result = await api<{ id: number | null; theme: string; category: string }>("/api/v1/themes/random");
@@ -1083,22 +1127,34 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
     }
   }
 
+  async function submitHomeEssay() {
+    if (!canSubmit) return;
+    if (!selectedTopic.titulo) {
+      setTopicError(true);
+      topicInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => topicInputRef.current?.focus({ preventScroll: true }), 450);
+      return;
+    }
+    setTopicError(false);
+    await onSubmit(homeText, topicMode === "random" ? randomTopic?.id || null : null, topicMode === "choose" || !randomTopic?.id ? selectedTopic.titulo : null);
+  }
+
   return (
     <div className="home-page app-page">
       <section className="home-motivation" aria-live="polite">
-        <div className="home-banner-sticker"><Sparkles size={22} /> BORA!</div>
-        <div className="home-banner-copy">
-          <span>DESAFIO DO DIA</span>
-          <p key={messageIndex}>{HOME_CAROUSEL[messageIndex]}</p>
-          <div className="home-carousel-dots" aria-hidden="true">
-            {HOME_CAROUSEL.map((_, index) => <i key={index} className={index === messageIndex ? "is-active" : ""} />)}
+        <img className="home-motivation-art" src="/images/ranking-prizes-banner.png" alt="Top 3 premiado: primeiro lugar Netflix e CapCut Pro, segundo lugar Disney+, terceiro lugar Crunchyroll" />
+        <div className="home-motivation-footer">
+          <div className="home-banner-copy">
+            <span>MOTIVAÇÃO DA VEZ</span>
+            <p key={messageIndex}>{HOME_CAROUSEL[messageIndex]}</p>
+            <div className="home-carousel-dots" aria-hidden="true">
+              {HOME_CAROUSEL.map((_, index) => <i key={index} className={index === messageIndex ? "is-active" : ""} />)}
+            </div>
           </div>
+          <button onClick={focusWritingArea}>
+            Começar agora <ChevronRight size={19} />
+          </button>
         </div>
-        <button onClick={focusWritingArea}>
-          Começar agora <ChevronRight size={19} />
-        </button>
-        <span className="home-banner-shape shape-one">✦</span>
-        <span className="home-banner-shape shape-two">●</span>
       </section>
 
       <div className="home-layout">
@@ -1138,14 +1194,18 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
           </div>
 
           {topicMode === "choose" && (
-            <label className="home-topic-select">
+            <label className={`home-topic-select ${topicError ? "is-error" : ""}`}>
               <span>Escreva o tema da sua redação</span>
               <input
+                ref={topicInputRef}
                 value={customTopic}
-                onChange={(event) => setCustomTopic(event.target.value)}
+                onChange={(event) => { setCustomTopic(event.target.value); if (event.target.value.trim()) setTopicError(false); }}
                 placeholder="Ex.: Os desafios da inclusão digital no Brasil"
                 aria-label="Tema da redação"
+                aria-invalid={topicError}
+                aria-describedby={topicError ? "home-topic-error" : undefined}
               />
+              {topicError && <strong id="home-topic-error" className="home-topic-error" role="alert"><AlertTriangle size={15} /> Escolha ou escreva um tema antes de enviar sua redação.</strong>}
             </label>
           )}
 
@@ -1183,7 +1243,7 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
               <span className="home-live-proof">Agora mesmo há alunos recebendo nota enquanto você escreve.</span>
             </div>
             <button
-              onClick={() => canSubmit && selectedTopic.titulo && onSubmit(homeText, topicMode === "random" ? randomTopic?.id || null : null, topicMode === "choose" || !randomTopic?.id ? selectedTopic.titulo : null)}
+              onClick={submitHomeEssay}
               className={`home-writing-cta ${canSubmit ? "is-ready" : ""}`}
               aria-disabled={!canSubmit}
             >
@@ -1237,28 +1297,54 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
               </div>
               <Trophy size={27} />
             </div>
+            <div aria-live="polite" className="mb-3 px-3 py-2 rounded-xl flex items-center justify-between gap-3" style={{ background: "#F3E8FF", color: "#5B21B6", border: "1px solid #DDD0FF" }}>
+              <span style={{ fontSize: ".72rem", fontWeight: 700 }}>REINICIA EM</span>
+              <strong style={{ fontFamily: ff.mono, fontSize: ".82rem" }}>{countdownDays}d {String(countdownHours).padStart(2, "0")}h {String(countdownMinutes).padStart(2, "0")}m {String(countdownRemainingSeconds).padStart(2, "0")}s</strong>
+            </div>
+            <div className="home-prizes-pitch">
+              <span><Sparkles size={13} /> TOP 3 PREMIADO</span>
+              <strong>Seu treino pode virar entretenimento.</strong>
+              <small>Escreva, some pontos e dispute os prêmios da semana.</small>
+            </div>
+            <div className="home-ranking-prizes" aria-label={`Prêmios da semana: ${RANKING_PRIZES.map((prize) => `${prize.place}, ${prize.detail}`).join("; ")}`}>
+              <div className="home-ranking-prizes-track">
+                {RANKING_PRIZES.map((prize, index) => (
+                  <article className={`home-prize-card is-place-${index + 1}`} key={prize.place}>
+                    <b className="home-prize-medal">{prize.medal}</b>
+                    <div className="home-prize-logos">
+                      {prize.logos.map((logo) => <span key={logo.name} className={`home-brand-mark is-${logo.kind}`} aria-label={logo.name}>{logo.mark}</span>)}
+                    </div>
+                    <div className="home-prize-copy">
+                      <small>{prize.place}</small>
+                      <strong>{prize.title}</strong>
+                      <span>{prize.detail}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
             <div className="home-ranking-list">
               <div className="home-ranking-podium-label"><Crown size={14} /> TOP 3 DA SEMANA</div>
               {ranking.leaders.map((item) => (
                 <div key={item.pos} className={`home-ranking-row is-podium is-podium-${item.pos}`}>
-                  <span className="home-position">#{item.pos}</span>
+                  <span className="home-position">{item.pos}º</span>
                   <span className="home-rank-avatar">{item.name[0]}</span>
-                  <span className="home-rank-name">{item.name}<small>{item.essays} redações</small></span>
+                  <span className="home-rank-name">{item.name}</span>
                   <strong>{item.score} pts</strong>
                 </div>
               ))}
               <div className="home-ranking-you-label"><span>OUTRAS POSIÇÕES</span><i /></div>
               {ranking.others.map((item) => (
                 <div key={item.pos} className="home-ranking-row">
-                  <span className="home-position">#{item.pos}</span>
+                  <span className="home-position">{item.pos}º</span>
                   <span className="home-rank-avatar">{item.name[0]}</span>
-                  <span className="home-rank-name">{item.name}<small>{item.essays} redações</small></span>
+                  <span className="home-rank-name">{item.name}</span>
                   <strong>{item.score} pts</strong>
                 </div>
               ))}
               <div className="home-ranking-you-label"><span>SUA POSIÇÃO</span><i /></div>
               <div className="home-ranking-row is-current">
-                <span className="home-position">#{ranking.user.pos.toLocaleString("pt-BR")}</span>
+                <span className="home-position">{ranking.user.pos.toLocaleString("pt-BR")}º</span>
                 <span className="home-rank-avatar">V</span>
                 <span className="home-rank-name">Você<small>{ranking.user.essays} redação(ões)</small></span>
                 <strong>{ranking.user.score} pts</strong>
@@ -1266,7 +1352,10 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
             </div>
             <div className="home-rank-nudge">
               <TrendingUp size={18} />
-              Continue enviando redações e aumentando sua nota para subir entre mais de 10 mil estudantes.
+              <span>
+                <strong>Como pontuar:</strong> após usar o sistema em 7 dias diferentes, cada redação nota 1000 vale 15 pontos e cada nota abaixo de 600 tira 30 pontos.
+                {ranking.activeDays < 7 && <small> Você já usou em {ranking.activeDays} de 7 dias.</small>}
+              </span>
             </div>
           </section>
 
@@ -1274,7 +1363,7 @@ function DashboardV3({ onNav, usage, analyses, theme, onSubmit, onSelectAnalysis
             {[
               { label: "Redações", value: analyses.length, Icon: FileText },
               { label: "Média", value: average, Icon: TrendingUp },
-              { label: "Posição", value: `#${ranking.user.pos.toLocaleString("pt-BR")}`, Icon: Crown },
+              { label: "Posição", value: `${ranking.user.pos.toLocaleString("pt-BR")}º`, Icon: Crown },
             ].map((item) => (
               <div className="home-stat" key={item.label}>
                 <item.Icon size={19} />
@@ -1519,6 +1608,25 @@ function ResultadoView({ onNav, detail }: { onNav: (v: View) => void; detail: Ap
     setSelectedComp(selectedComp === i ? null : i);
   }
 
+  const paidFeedbackLocked = !detail?.detailed_feedback;
+  const upgradeGate = (feature: string) => (
+    <div className="result-upgrade-gate">
+      <div className="result-upgrade-icon"><Lock size={25} /></div>
+      <span>RECURSO PREMIUM</span>
+      <h2>Desbloqueie {feature}</h2>
+      <p>Veja exatamente onde melhorar, entenda os trechos da sua redação e receba um plano de evolução mais completo.</p>
+      <ul>
+        <li><CheckCircle2 size={15} /> Evidências detalhadas por competência</li>
+        <li><CheckCircle2 size={15} /> Prioridades e próximos passos personalizados</li>
+        <li><CheckCircle2 size={15} /> Mais correções para acelerar sua evolução</li>
+      </ul>
+      <button onClick={() => onNav("planos")}>
+        Ver planos e liberar <ChevronRight size={18} />
+      </button>
+      <small>Escolha o plano que combina com o seu ritmo de estudos.</small>
+    </div>
+  );
+
   return (
     <div className="result-page app-page w-full max-w-none mx-auto">
       {/* Sticky sub-header */}
@@ -1560,7 +1668,10 @@ function ResultadoView({ onNav, detail }: { onNav: (v: View) => void; detail: Ap
                 fontWeight: tab === t ? 500 : 400,
               }}
             >
-              {t === "competencias" ? "Competências" : t === "evidencias" ? "Evidências" : "Próximos passos"}
+              <span className="result-tab-label">
+                {paidFeedbackLocked && t !== "competencias" && <Lock size={13} />}
+                {t === "competencias" ? "Competências" : t === "evidencias" ? "Evidências" : "Próximos passos"}
+              </span>
             </button>
           ))}
         </div>
@@ -1575,8 +1686,7 @@ function ResultadoView({ onNav, detail }: { onNav: (v: View) => void; detail: Ap
 
         {tab === "evidencias" && (
           <div className="result-evidences flex flex-col gap-4">
-            {!detail?.detailed_feedback && <div className="p-5 rounded-xl" style={{ background: "#fff7bd", color: "#5c4410" }}>As evidências detalhadas estão disponíveis no Premium, Ultra Premium ou em uma correção comprada com 150 créditos.</div>}
-            {competencies.flatMap((c) =>
+            {paidFeedbackLocked ? upgradeGate("as evidências da sua redação") : competencies.flatMap((c) =>
               c.evidencias.map((ev, i) => (
                 <div
                   key={`${c.id}-${i}`} className="result-evidence-card p-4 rounded-xl"
@@ -1611,8 +1721,7 @@ function ResultadoView({ onNav, detail }: { onNav: (v: View) => void; detail: Ap
 
         {tab === "proximos" && (
           <div className="result-next flex flex-col gap-4">
-            {!detail?.detailed_feedback && <div className="p-5 rounded-xl" style={{ background: "#fff7bd", color: "#5c4410" }}>Os pontos de melhoria fazem parte da correção Premium. Use 150 créditos ou assine um plano para liberar.</div>}
-            <div className="result-priorities p-4 rounded-2xl" style={{ background: "#16121F", border: "1px solid rgba(139,92,246,0.15)" }}>
+            {paidFeedbackLocked ? upgradeGate("seu plano de evolução") : <div className="result-priorities p-4 rounded-2xl" style={{ background: "#16121F", border: "1px solid rgba(139,92,246,0.15)" }}>
               <h3 style={{ fontFamily: ff.display, fontSize: "1rem", fontWeight: 600, color: "#F7F5FB", marginBottom: 12 }}>
                 Prioridades de melhoria
               </h3>
@@ -1634,7 +1743,7 @@ function ResultadoView({ onNav, detail }: { onNav: (v: View) => void; detail: Ap
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
 
             <button
               onClick={() => onNav("nova-redacao")}
@@ -2159,23 +2268,45 @@ function AdminView({ onNav }: { onNav: (v: View) => void }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
-function RealAdminView({ onNav }: { onNav: (v: View) => void }) {
+function RealAdminView({ onNav, csrfToken, onProfileChanged }: { onNav: (v: View) => void; csrfToken: string; onProfileChanged: () => Promise<void> }) {
   type AdminUser = { id: number; email: string; plan: string; is_active: boolean; created_at: string };
   type AdminAnalysis = { id: string; user_id: number; status: string; total_score: number | null; summary: string | null; created_at: string };
+  type DemoControls = { plan: "FREE" | "PREMIUM" | "ULTRA_PREMIUM"; bonus_credits: number; used: number; remaining: number | string; next_credit_at: string | null };
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [rows, setRows] = useState<AdminAnalysis[]>([]);
+  const [controls, setControls] = useState<DemoControls | null>(null);
+  const [creditInput, setCreditInput] = useState("0");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    Promise.all([api<AdminUser[]>("/api/v1/admin/users?page_size=50"), api<AdminAnalysis[]>("/api/v1/admin/analyses?page_size=50")])
-      .then(([nextUsers, nextRows]) => { setUsers(nextUsers); setRows(nextRows); })
+    Promise.all([api<AdminUser[]>("/api/v1/admin/users?page_size=50"), api<AdminAnalysis[]>("/api/v1/admin/analyses?page_size=50"), api<DemoControls>("/api/v1/admin/demo-controls")])
+      .then(([nextUsers, nextRows, nextControls]) => { setUsers(nextUsers); setRows(nextRows); setControls(nextControls); setCreditInput(String(nextControls.bonus_credits)); })
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Painel indisponível"));
   }, []);
+  async function updateControls(payload: { plan?: DemoControls["plan"]; bonus_credits?: number }) {
+    try {
+      setSaving(true); setError("");
+      const next = await api<DemoControls>("/api/v1/admin/demo-controls", { method: "PATCH", body: JSON.stringify(payload) }, csrfToken);
+      setControls(next); setCreditInput(String(next.bonus_credits)); await onProfileChanged();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível alterar o perfil"); }
+    finally { setSaving(false); }
+  }
   const scored = rows.filter((row) => row.total_score != null);
   const average = Math.round(scored.reduce((sum, row) => sum + (row.total_score || 0), 0) / Math.max(scored.length, 1));
   return <div className="app-page p-4 md:p-8 w-full max-w-6xl mx-auto">
     <div className="flex items-center gap-3 mb-6"><button aria-label="Voltar" onClick={() => onNav("perfil")} className="p-2 rounded-xl bg-white"><ArrowLeft size={18} /></button><div><h1 style={{ fontFamily: ff.display, fontSize: "1.5rem", fontWeight: 700 }}>Painel administrativo</h1><p style={{ color: "#6f6680", fontSize: ".8rem" }}>Dados reais do backend</p></div></div>
     {error && <div role="alert" className="mb-4 p-3 rounded-xl bg-red-100 text-red-800">{error}</div>}
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">{[["Usuários", users.length], ["Redações", rows.length], ["Nota média", `${average} pts`], ["Planos pagos", users.filter((user) => user.plan !== "FREE" && user.is_active).length]].map(([label, value]) => <div key={label} className="p-4 rounded-2xl bg-white border"><strong className="block text-2xl text-purple-700">{value}</strong><span className="text-sm text-slate-500">{label}</span></div>)}</div>
+    {controls && <section className="bg-white border rounded-2xl p-4 mb-6">
+      <h2 className="font-bold mb-3">Meu perfil de testes</h2>
+      <div className="flex flex-wrap gap-2 mb-4">{(["FREE", "PREMIUM", "ULTRA_PREMIUM"] as const).map((plan) => <button key={plan} disabled={saving} onClick={() => updateControls({ plan })} className="px-4 py-2 rounded-xl border font-semibold" style={{ background: controls.plan === plan ? "#6D28D9" : "#fff", color: controls.plan === plan ? "#fff" : "#4C1D95" }}>{plan.replace("_", " ")}</button>)}</div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-sm font-semibold">Créditos extras<input type="number" min="0" max="100000" value={creditInput} onChange={(event) => setCreditInput(event.target.value)} className="block mt-1 px-3 py-2 rounded-xl border w-40" /></label>
+        <button disabled={saving} onClick={() => updateControls({ bonus_credits: Math.max(0, Math.min(100000, Number(creditInput) || 0)) })} className="px-4 py-2 rounded-xl bg-purple-700 text-white font-semibold">Salvar créditos</button>
+        <button disabled={saving} onClick={() => updateControls({ plan: "ULTRA_PREMIUM" })} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold">Créditos infinitos</button>
+      </div>
+      <p className="mt-3 text-sm text-slate-500">Plano atual: {controls.plan.replace("_", " ")} · Restantes: {String(controls.remaining)} · Usados hoje: {controls.used}</p>
+    </section>}
     <section className="bg-white border rounded-2xl overflow-hidden mb-6"><h2 className="p-4 font-bold">Usuários recentes</h2>{users.map((user) => <div key={user.id} className="grid grid-cols-3 gap-3 p-3 border-t text-sm"><span className="truncate">{user.email}</span><span>{user.plan}</span><span>{new Date(user.created_at).toLocaleDateString("pt-BR")}</span></div>)}</section>
     <section className="bg-white border rounded-2xl overflow-hidden"><h2 className="p-4 font-bold">Redações recentes</h2>{rows.map((row) => <div key={row.id} className="grid grid-cols-3 gap-3 p-3 border-t text-sm"><span className="truncate">{row.summary || row.status}</span><strong>{row.total_score ?? "—"}</strong><span>{new Date(row.created_at).toLocaleDateString("pt-BR")}</span></div>)}</section>
   </div>;
@@ -2284,16 +2415,17 @@ export default function App() {
       <main className="md:pt-16" style={{ paddingBottom: hideBottomNav ? 0 : undefined }}>
         <div className={hideBottomNav ? "" : "pb-24 md:pb-6"}>
           {error && <div role="alert" style={{ margin: "1rem", padding: ".8rem 1rem", borderRadius: "1rem", background: "#fee2e2", color: "#991b1b", fontSize: ".85rem" }}>{error}</div>}
-          {view === "dashboard" && <DashboardV3 onNav={navigate} usage={usage} analyses={analyses} theme={theme} onSubmit={submitEssay} onSelectAnalysis={selectAnalysis} />}
+          {view === "dashboard" && <DashboardV3 onNav={navigate} usage={usage} analyses={analyses} theme={theme} accountCreatedAt={user.created_at} onSubmit={submitEssay} onSelectAnalysis={selectAnalysis} />}
           {view === "processando" && <ProcessandoView analysisId={analysisId} onComplete={finishAnalysis} onError={failAnalysis} />}
           {view === "resultado" && <ResultadoView onNav={navigate} detail={detail} />}
           {view === "historico" && <HistoricoView analyses={analyses} onSelect={selectAnalysis} onDelete={deleteAnalysis} onLoadMore={loadMoreAnalyses} hasMore={analyses.length < analysesTotal} />}
           {view === "planos" && <PlanosView plans={plans} usage={usage} csrfToken={user?.csrf_token || ""} />}
           {view === "perfil" && <PerfilView onNav={navigate} user={user} usage={usage} analyses={analyses} onToggleReminders={toggleReminders} onLogout={logout} onDeleteAccount={deleteAccount} />}
-          {view === "admin" && <RealAdminView onNav={navigate} />}
+          {view === "admin" && <RealAdminView onNav={navigate} csrfToken={user.csrf_token} onProfileChanged={loadData} />}
         </div>
       </main>
       {!hideBottomNav && <BottomNav view={view} onNav={navigate} />}
+      {user.role === "ADMIN" && view !== "admin" && <button onClick={() => navigate("admin")} aria-label="Abrir painel administrativo" title="Painel administrativo" className="fixed right-5 bottom-24 md:bottom-6 z-50 w-14 h-14 rounded-full grid place-items-center text-white" style={{ background: "linear-gradient(135deg,#5B21B6,#8B5CF6)", boxShadow: "0 12px 30px rgba(91,33,182,.4)" }}><Shield size={24} /></button>}
     </div>
   );
 }

@@ -6,13 +6,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas import AdminAnalysisSummary, AdminUserSummary, DemoControlsResponse, DemoControlsUpdate
-from app.core.web_security import require_admin, require_csrf
+from app.core.web_security import require_admin, require_admin_ip, require_csrf
 from app.database.database import get_session
 from app.database.models import Analysis, Plan, UsageDaily, User
 from app.services.usage import UsageLimiter
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_ip)])
 
 
 @router.get("/demo-controls", response_model=DemoControlsResponse)

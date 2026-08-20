@@ -16,7 +16,7 @@ async def me(
     user: User = Depends(get_current_user), session: WebSession = Depends(get_web_session)
 ) -> UserResponse:
     return UserResponse(
-        id=user.id, username=user.username, email=user.email, role=user.role.value, plan=user.plan.name,
+        id=user.id, created_at=user.created_at, username=user.username, email=user.email, role=user.role.value, plan=user.plan.name,
         bonus_credits=user.bonus_credits, reminders_enabled=user.reminders_enabled,
         csrf_token=session.csrf_token, subscription_status=user.subscription_status,
     )

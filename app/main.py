@@ -2,7 +2,8 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
@@ -49,5 +50,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "X-Request-ID", "Stripe-Signature"],
 )
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("unhandled_request_error", extra={"correlation_id": getattr(request.state, "correlation_id", None), "path": request.url.path})
+    return JSONResponse(status_code=500, content={"detail": "Erro interno", "request_id": getattr(request.state, "correlation_id", None)})
+
 app.include_router(health_router)
 app.include_router(api_v1_router)
