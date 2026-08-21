@@ -1601,13 +1601,18 @@ function ProcessandoView({ analysisId, onComplete, onError }: { analysisId: stri
   useEffect(() => {
     if (!analysisId) return;
     let cancelled = false;
+    const startedAt = Date.now();
     const poll = async () => {
       try {
+        if (Date.now() - startedAt > 240_000) {
+          onError("A correção demorou mais que o esperado. Ela continuará sendo processada e aparecerá no histórico.");
+          return;
+        }
         const detail = await api<ApiAnalysisDetail>(`/api/v1/analyses/${analysisId}`);
         if (cancelled) return;
         if (detail.status === "COMPLETED") { setDone(true); onComplete(detail); return; }
         if (detail.status === "FAILED" || detail.status === "CANCELLED") { onError("Não foi possível concluir a correção."); return; }
-        window.setTimeout(poll, 1500);
+        window.setTimeout(poll, 2_000);
       } catch (error) { if (!cancelled) onError(error instanceof Error ? error.message : "Falha ao consultar a correção"); }
     };
     poll();

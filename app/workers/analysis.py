@@ -45,5 +45,6 @@ class WorkerSettings:
     functions = [process_analysis]
     redis_settings = redis_settings()
     queue_name = ANALYSIS_QUEUE_NAME
-    max_jobs = 4
+    # API and worker share the 512 MB Render free container.
+    max_jobs = 1
     job_timeout = 180
