@@ -50,15 +50,38 @@ interface ApiPlan { name: string; daily_limit: number; price_cents: number; deta
 interface ApiCreditTransaction { id: string; amount: number; balance_after: number; reason: string; description: string; created_at: string }
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
+const API_TIMEOUT_MS = 75_000;
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = API_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const originalSignal = options.signal;
+  const abortFromCaller = () => controller.abort();
+  if (originalSignal?.aborted) controller.abort();
+  else originalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") {
+      throw new Error("O servidor demorou para responder. Tente novamente.");
+    }
+    throw reason;
+  } finally {
+    window.clearTimeout(timer);
+    originalSignal?.removeEventListener("abort", abortFromCaller);
+  }
+}
 
 async function api<T>(path: string, options: RequestInit = {}, csrfToken?: string): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body) headers.set("Content-Type", "application/json");
   if (csrfToken) headers.set("X-CSRF-Token", csrfToken);
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers, credentials: "include" });
+  const response = await fetchWithTimeout(`${API_URL}${path}`, { ...options, headers, credentials: "include" });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail || `Erro ${response.status} ao acessar a API`);
+    const error = new Error(payload?.detail || `Erro ${response.status} ao acessar a API`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
   return response.json() as Promise<T>;
 }
@@ -663,7 +686,6 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [mfaCode, setMfaCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [backendStatus, setBackendStatus] = useState<"idle" | "waking" | "ready" | "error">("idle");
@@ -679,7 +701,7 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
 
     // Avoid flashing the notice when the backend is already awake.
     wakeMessageTimer.current = window.setTimeout(() => setBackendStatus("waking"), 1200);
-    wakeRequest.current = fetch(`${API_URL}/health`, { credentials: "include" })
+    wakeRequest.current = fetchWithTimeout(`${API_URL}/health`, { credentials: "include" })
       .then((response) => {
         if (!response.ok) throw new Error(`Health check failed with ${response.status}`);
         setBackendStatus("ready");
@@ -708,9 +730,17 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
       setLoading(true); setMessage("");
       const backendReady = await wakeBackend();
       if (!backendReady) throw new Error("Não foi possível iniciar o servidor. Tente novamente.");
-      await api(`/api/v1/auth/${mode === "login" ? "login" : "register"}`, {
-        method: "POST", body: JSON.stringify({ username, password, ...(mode === "register" ? { email } : {}), ...(mode === "login" && mfaCode ? { mfa_code: mfaCode } : {}) }),
-      });
+      const endpoint = `/api/v1/auth/${mode === "login" ? "login" : "register"}`;
+      const credentials = { username, password, ...(mode === "register" ? { email } : {}) };
+      try {
+        await api(endpoint, { method: "POST", body: JSON.stringify(credentials) });
+      } catch (reason) {
+        const authError = reason as Error & { status?: number };
+        if (mode !== "login" || authError.status !== 428 || authError.message !== "MFA_REQUIRED") throw reason;
+        const code = window.prompt("Digite seu código de segurança:")?.trim();
+        if (!code) throw new Error("Código de segurança não informado");
+        await api(endpoint, { method: "POST", body: JSON.stringify({ ...credentials, mfa_code: code }) });
+      }
       await onAuthenticated();
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "Não foi possível acessar sua conta");
@@ -738,11 +768,6 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
             <input autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_.\-]+" value={username} onFocus={wakeBackend} onChange={(e) => { setUsername(e.target.value); wakeBackend(); }} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="seu_usuario" />
           </div>
         </label>
-        {mode === "login" && <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Código de segurança <span style={{ fontWeight: 400 }}>(somente administrador)</span>
-          <div className="relative mt-1.5"><Shield size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
-            <input inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={6} pattern="[0-9]{6}" value={mfaCode} onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="000000" />
-          </div>
-        </label>}
         <label className="auth-label" style={{ color: "#C9C1D5", fontSize: ".82rem" }}>Senha
           <div className="relative mt-1.5"><Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "#9D94AC" }} />
             <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} maxLength={128} value={password} onFocus={wakeBackend} onChange={(e) => { setPassword(e.target.value); wakeBackend(); }} className="auth-input w-full pl-10 pr-4 py-3 rounded-xl outline-none" style={inputStyle} placeholder="Mínimo de 8 caracteres" />
@@ -759,7 +784,7 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }
         <button disabled={loading} className="auth-submit w-full py-3 rounded-xl flex justify-center gap-2" style={{ color: "#fff", fontWeight: 700, background: "linear-gradient(135deg,#5B21B6,#8B5CF6)", opacity: loading ? .7 : 1 }}>
           {loading ? <RefreshCw size={17} className="animate-spin" /> : mode === "login" ? "Entrar" : "Criar conta"}
         </button>
-        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setEmail(""); setPasswordConfirmation(""); setMfaCode(""); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
+        <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setEmail(""); setPasswordConfirmation(""); setMessage(""); }} style={{ color: "#A78BFA", fontSize: ".82rem" }}>
           {mode === "login" ? "Ainda não tenho conta" : "Já tenho uma conta"}
         </button>
       </form>
@@ -2453,7 +2478,7 @@ export default function App() {
   const identity = displayIdentity(user);
   const credits = usage?.bonus_credits || 0;
 
-  if (!authChecked) return <div className="min-h-screen grid place-items-center" style={{ background: "#08070C", color: "#A78BFA" }}><RefreshCw className="animate-spin" /></div>;
+  if (!authChecked) return <div className="min-h-screen grid place-items-center px-6 text-center" style={{ background: "#08070C", color: "#A78BFA" }}><div className="grid justify-items-center gap-4"><RefreshCw className="animate-spin" /><p style={{ maxWidth: 380, color: "#F7F5FB", lineHeight: 1.6 }}>Eita! Muita gente está fazendo redação agora. Será que você consegue melhor que eles? 👀</p></div></div>;
   if (!user) return <LoginView onAuthenticated={loadData} />;
 
   return (

@@ -76,7 +76,9 @@ async def login(payload: CredentialsRequest, response: Response, request: Reques
         if user.role is UserRole.ADMIN:
             if not settings.admin_totp_secret:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "MFA administrativo não configurado")
-            if not verify_totp(settings.admin_totp_secret, payload.mfa_code or ""):
+            if not payload.mfa_code:
+                raise HTTPException(status.HTTP_428_PRECONDITION_REQUIRED, "MFA_REQUIRED")
+            if not verify_totp(settings.admin_totp_secret, payload.mfa_code):
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Código MFA inválido")
         user_id = user.id
     await get_redis().delete(lock_key)
