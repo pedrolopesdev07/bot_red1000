@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
 from app.api.v1.router import router as api_v1_router
-from app.bot.bot import run_bot
 from app.core.queue import close_queue
 from app.core.redis import close_redis
 from app.core.web_middleware import SecurityHeadersMiddleware
@@ -22,16 +20,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    task: asyncio.Task[None] | None = None
-    if settings.enable_telegram_bot and settings.telegram_bot_token:
-        task = asyncio.create_task(run_bot(settings.telegram_bot_token), name="telegram-polling")
-    else:
-        logger.warning("Telegram bot disabled because TELEGRAM_BOT_TOKEN is empty")
     yield
-    if task:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
     await close_queue()
     await close_redis()
 

@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
-    telegram_bot_token: str = ""
     gemini_api_key: str = ""
     database_url: str = "postgresql+asyncpg://redacao:redacao_dev@localhost:5432/redacao_db"
     secret_key: str = ""
@@ -18,8 +17,6 @@ class Settings(BaseSettings):
     min_essay_length: int = Field(default=100, ge=1)
     max_essay_length: int = Field(default=30_000, ge=100)
     premium_daily_limit: int = Field(default=10, ge=1)
-    test_unlock_code: str = ""
-    test_admin_telegram_id: int | None = None
     premium_checkout_url: str = ""
     ultra_premium_checkout_url: str = ""
     credits_checkout_url: str = ""
@@ -59,7 +56,6 @@ class Settings(BaseSettings):
     stripe_credits_price_id: str = ""
     data_retention_days: int = Field(default=365, ge=1)
     database_pool_size: int = Field(default=10, ge=1, le=100)
-    enable_telegram_bot: bool = False
     admin_allowed_ips: str = ""
     admin_totp_secret: str = ""
     max_request_body_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
@@ -92,11 +88,6 @@ class Settings(BaseSettings):
 
     def cakto_product_ids(self, value: str) -> set[str]:
         return {item.strip() for item in value.split(",") if item.strip()}
-
-    @field_validator("test_admin_telegram_id", mode="before")
-    @classmethod
-    def empty_admin_id_is_none(cls, value: object) -> object:
-        return None if value == "" else value
 
     @field_validator("cookie_samesite")
     @classmethod

@@ -7,8 +7,7 @@ revision = "0001_initial"
 down_revision = None
 
 status = sa.Enum(
-    "WAITING_TRANSCRIPTION", "WAITING_CONFIRMATION", "EDITING_TEXT", "PROCESSING_ANALYSIS",
-    "COMPLETED", "FAILED", "CANCELLED", name="analysisstatus"
+    "PROCESSING_ANALYSIS", "COMPLETED", "FAILED", "CANCELLED", name="analysisstatus"
 )
 
 
@@ -27,13 +26,12 @@ def upgrade() -> None:
         {"name": "PRO", "daily_limit": 5, "price": 0, "active": True},
         {"name": "VIP", "daily_limit": 10, "price": 0, "active": True}])
     op.create_table("users", sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("telegram_id", sa.BigInteger(), nullable=False), sa.Column("username", sa.String(255)),
-        sa.Column("first_name", sa.String(255)), sa.Column("plan_id", sa.Integer(), sa.ForeignKey("plans.id"), nullable=False),
+        sa.Column("username", sa.String(255)),
+        sa.Column("plan_id", sa.Integer(), sa.ForeignKey("plans.id"), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.UniqueConstraint("telegram_id"))
-    op.create_index("ix_users_telegram_id", "users", ["telegram_id"])
+    )
     op.create_index("ix_users_plan_id", "users", ["plan_id"])
     op.create_table("analyses", sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),

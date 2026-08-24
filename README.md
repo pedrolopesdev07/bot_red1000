@@ -1,6 +1,6 @@
 # Reda1000IA
 
-Plataforma web mobile-first para correção de redações do ENEM com Gemini. O canal Telegram permanece no código apenas para uma transição gradual e vem desativado por padrão (`ENABLE_TELEGRAM_BOT=false`).
+Plataforma web mobile-first para correção de redações do ENEM com Gemini.
 
 ## Visão rápida
 
@@ -15,7 +15,6 @@ O sistema recebe a redação pela interface web, reserva créditos, coloca a ava
 | `app/database` | Modelos, conexão e repositories assíncronos |
 | `app/workers` | Processamento assíncrono das avaliações |
 | `app/scheduler` | Retenção de dados e lembretes |
-| `app/bot` | Canal Telegram legado e opcional |
 | `frontend` | Aplicação React/Vite responsiva |
 | `migrations` | Migrações Alembic do PostgreSQL |
 | `tests` | Testes unitários e de contrato |
@@ -34,7 +33,6 @@ O sistema recebe a redação pela interface web, reserva créditos, coloca a ava
 - `app/services/enem`: contrato independente do provedor, rubrica resumida e cálculo de nota.
 - `app/services/usage`: reserva atômica de créditos no PostgreSQL.
 - `app/database`: modelos e repositories SQLAlchemy assíncronos.
-- `app/bot`: canal Telegram legado e opcional.
 
 A API responde `QUEUED` imediatamente e o worker processa o Gemini fora da requisição HTTP. ARQ foi escolhido por integrar naturalmente funções assíncronas Python e Redis com uma superfície operacional menor que Celery neste estágio. A nota total é recalculada no Python e a reserva de crédito ocorre antes do processamento, inclusive se o provedor falhar depois.
 
@@ -111,7 +109,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Para execução sem Docker, inicie também Redis, `arq app.workers.analysis.WorkerSettings`, `arq app.scheduler.main.WorkerSettings` e o frontend em `frontend/`. O bot só inicia quando `ENABLE_TELEGRAM_BOT=true`.
+Para execução sem Docker, inicie também Redis, `arq app.workers.analysis.WorkerSettings`, `arq app.scheduler.main.WorkerSettings` e o frontend em `frontend/`.
 
 ## Docker
 
@@ -122,14 +120,6 @@ docker compose up --build
 ```
 
 O Compose inicia PostgreSQL, Redis, migration, API, worker, scheduler e frontend. As credenciais padrão são apenas para desenvolvimento.
-
-## Canal Telegram legado
-
-`/start` cria o usuário no FREE (1 análise a cada 24 horas) e mantém o fluxo antigo disponível durante a migração. O checkout web usa Stripe; os links externos do Telegram permanecem apenas por compatibilidade.
-
-Comandos: `/start`, `/help`, `/plan`, `/status`, `/historico`, `/tema`, `/lembretes`, `/premium` e `/cancelar`.
-
-`/historico` mostra as 10 correções mais recentes, a variação da nota e a competência que merece mais atenção. `/tema` publica uma proposta semanal e `/lembretes` permite optar pelo aviso automático de renovação do crédito FREE.
 
 ## Testes
 

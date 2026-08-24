@@ -9,8 +9,7 @@ down_revision = "0003_reminder_preferences"
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE analysisstatus ADD VALUE IF NOT EXISTS 'QUEUED' BEFORE 'WAITING_TRANSCRIPTION'")
-    op.alter_column("users", "telegram_id", existing_type=sa.BigInteger(), nullable=True)
+    op.execute("ALTER TYPE analysisstatus ADD VALUE IF NOT EXISTS 'QUEUED'")
     role = postgresql.ENUM("USER", "SUPPORT", "ADMIN", name="userrole")
     role.create(op.get_bind(), checkfirst=True)
     op.add_column("users", sa.Column("email", sa.String(320)))
@@ -70,4 +69,4 @@ def downgrade() -> None:
     op.drop_column("users", "mfa_enabled")
     op.drop_column("users", "role")
     op.drop_column("users", "email")
-    op.alter_column("users", "telegram_id", existing_type=sa.BigInteger(), nullable=False)
+    # Identity columns removed by later migrations are intentionally not restored.

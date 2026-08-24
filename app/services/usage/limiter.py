@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import UsageDaily, User
 from app.services.plans import get_plan_policy
-from app.services.test_access import test_access_registry
 
 
 @dataclass(frozen=True)
@@ -53,8 +52,7 @@ class UsageLimiter:
 
     async def status(self, user: User, day: date | None = None) -> UsageLimit:
         day = day or date.today()
-        selected_plan = test_access_registry.selected_plan(user.telegram_id)
-        effective_plan = selected_plan.value if selected_plan else user.plan.name
+        effective_plan = user.plan.name
         policy = get_plan_policy(effective_plan)
         next_credit_at = None
         if effective_plan == "FREE":
@@ -77,16 +75,13 @@ class UsageLimiter:
             effective_plan,
             policy.daily_analyses,
             used or 0,
-            unlimited=policy.unlimited or test_access_registry.is_unlimited(user.telegram_id),
+            unlimited=policy.unlimited,
             next_credit_at=next_credit_at,
         )
 
     async def consume(self, user: User, day: date | None = None) -> UsageLimit | None:
         """Atomically reserves one analysis credit. Caller owns transaction commit/rollback."""
         day = day or date.today()
-        if test_access_registry.is_unlimited(user.telegram_id):
-            current = await self.status(user, day)
-            return current
         policy = get_plan_policy(user.plan.name)
         table = UsageDaily.__table__
         if user.plan.name == "FREE":

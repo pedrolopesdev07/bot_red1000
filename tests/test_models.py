@@ -5,14 +5,13 @@ from app.database.models import AnalysisStatus, Plan, User
 
 def test_new_user_can_access_assigned_plan_without_lazy_loading() -> None:
     free = Plan(id=1, name="FREE", daily_limit=1, price=0, active=True)
-    user = User(telegram_id=123, plan_id=free.id, plan=free)
+    user = User(email="student@example.com", plan_id=free.id, plan=free)
     assert user.plan.name == "FREE"
     assert user.plan.daily_limit == 1
 
 
 def test_analysis_status_transitions_are_declared() -> None:
-    expected = {"WAITING_CONFIRMATION", "EDITING_TEXT",
-                "PROCESSING_ANALYSIS", "COMPLETED"}
+    expected = {"QUEUED", "PROCESSING_ANALYSIS", "COMPLETED", "FAILED", "CANCELLED"}
     assert expected <= {status.value for status in AnalysisStatus}
 
 

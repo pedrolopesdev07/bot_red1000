@@ -2,7 +2,7 @@ from datetime import datetime
 
 import enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.models.base import Base, TimestampMixin
@@ -17,11 +17,9 @@ class UserRole(str, enum.Enum):
 class User(TimestampMixin, Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(255))
     password_hash: Mapped[str | None] = mapped_column(String(255))
-    first_name: Mapped[str | None] = mapped_column(String(255))
     plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
