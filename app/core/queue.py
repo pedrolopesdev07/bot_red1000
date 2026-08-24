@@ -21,5 +21,5 @@ async def get_queue() -> ArqRedis:
 async def close_queue() -> None:
     global _pool
     if _pool is not None:
-        await _pool.close()
+        await _pool.aclose()
         _pool = None

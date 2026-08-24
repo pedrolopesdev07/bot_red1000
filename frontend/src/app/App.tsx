@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef, type FormEvent } from "react";
 import {
   Home, PenLine, Clock, CreditCard, User, LogOut, ChevronRight,
   Sparkles, TrendingUp, ArrowLeft, FileText, BarChart3, Users,
@@ -6,9 +6,8 @@ import {
   Camera, Mic, Upload, Info, RefreshCw, Settings, Bell, Copy,
   Share2, Trophy, Target,
 } from "lucide-react";
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-} from "recharts";
+
+const ScoreEvolutionChart = lazy(() => import("./components/ScoreEvolutionChart"));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,7 +44,13 @@ interface Competencia {
 interface ApiUser { id: number; created_at: string; username: string | null; email: string | null; role: string; plan: string; bonus_credits: number; reminders_enabled: boolean; csrf_token: string; subscription_status: string }
 interface ApiUsage { plan: string; limit: number | string; used: number; remaining: number | string; next_credit_at: string | null; bonus_credits: number }
 interface ApiAnalysisSummary { id: string; status: string; created_at: string; completed_at: string | null; total_score: number | null; summary: string | null }
-interface ApiAnalysisDetail extends ApiAnalysisSummary { text: string | null; competency_scores: Array<number | null>; feedback: Record<string, any> | null; detailed_feedback: boolean; topic: string | null }
+interface CompetencyFeedback {
+  score?: number;
+  justification?: string;
+  evidence?: Array<string | { text?: string; texto?: string; tipo?: string }>;
+  improvements?: string[];
+}
+interface ApiAnalysisDetail extends ApiAnalysisSummary { text: string | null; competency_scores: Array<number | null>; feedback: Record<string, unknown> | null; detailed_feedback: boolean; topic: string | null }
 interface ApiPlan { name: string; daily_limit: number; price_cents: number; detailed_feedback: boolean; unlimited: boolean; gemini_daily_limit: number | null }
 interface ApiCreditTransaction { id: string; amount: number; balance_after: number; reason: string; description: string; created_at: string }
 
@@ -86,7 +91,7 @@ async function api<T>(path: string, options: RequestInit = {}, csrfToken?: strin
   return response.json() as Promise<T>;
 }
 
-function displayIdentity(user: ApiUser | null) {
+export function displayIdentity(user: ApiUser | null) {
   const email = user?.email || user?.username || "Conta local";
   const local = user?.username || (email.includes("@") ? email.split("@")[0] : email);
   const name = local.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -94,7 +99,7 @@ function displayIdentity(user: ApiUser | null) {
   return { name, email, initials };
 }
 
-function dailyRanking(analyses: ApiAnalysis[], accountCreatedAt: string, now = Date.now()) {
+export function dailyRanking(analyses: ApiAnalysisSummary[], accountCreatedAt: string, now = Date.now()) {
   const cycleDuration = 7 * 86_400_000;
   const createdAt = new Date(accountCreatedAt).getTime();
   const validCreatedAt = Number.isFinite(createdAt) ? createdAt : now;
@@ -126,13 +131,13 @@ function dailyRanking(analyses: ApiAnalysis[], accountCreatedAt: string, now = D
 function detailCompetencies(detail: ApiAnalysisDetail | null): Competencia[] {
   if (!detail) return [];
   return [1, 2, 3, 4, 5].map((number) => {
-    const value = detail.feedback?.[`competencia_${number}`] || {};
+    const value = (detail.feedback?.[`competencia_${number}`] as CompetencyFeedback | undefined) ?? {};
     const evidencias: Evidencia[] = (value.evidence || []).map((entry: string | { text?: string; texto?: string; tipo?: string }) => {
       const texto = typeof entry === "string" ? entry : entry.text || entry.texto || "";
       const legacyWeakness = /\b(ausência|erro|desvio|insufici|problema|falha|inadequ|repetitiv|sem sentido|não (?:há|apresenta|possui)|falta)\b/i.test(texto);
       const isWeakness = typeof entry === "string" ? legacyWeakness : entry.tipo === "ponto_fraco";
-      return { texto, tipo: isWeakness ? "negativo" : "positivo" };
-    }).filter((entry: Evidencia) => entry.texto);
+      return { texto, tipo: isWeakness ? "negativo" as const : "positivo" as const };
+    }).filter((entry) => Boolean(entry.texto));
     return {
       id: number, sigla: `C${number}`, nome: ["Domínio da língua formal", "Compreensão da proposta", "Seleção de argumentos", "Coesão e coerência", "Proposta de intervenção"][number - 1],
       nota: Number(value.score ?? detail.competency_scores[number - 1] ?? 0), max: 200,
@@ -503,7 +508,7 @@ function CreditBadge({ credits }: { credits: number }) {
     >
       <Zap size={13} style={{ color: "#FF7A45" }} />
       <span style={{ fontFamily: ff.mono, fontSize: "0.8rem", fontWeight: 600, color: "#2F2341" }}>{credits}</span>
-      <span style={{ fontFamily: ff.body, fontSize: "0.72rem", color: "#9D94AC" }}>créditos</span>
+      <span style={{ fontFamily: ff.body, fontSize: "0.72rem", color: "#655A76" }}>créditos</span>
     </div>
   );
 }
@@ -1677,9 +1682,13 @@ function ResultadoView({ onNav, detail }: { onNav: (v: View) => void; detail: Ap
   const [tab, setTab] = useState<"competencias" | "evidencias" | "proximos">("competencias");
   const competencies = detailCompetencies(detail);
   const totalScore = detail?.total_score ?? competencies.reduce((a, c) => a + c.nota, 0);
+  const feedbackImprovements = detail?.feedback?.improvements;
+  const typedImprovements = Array.isArray(feedbackImprovements)
+    ? feedbackImprovements.filter((item): item is string => typeof item === "string")
+    : [];
   const nextSteps: string[] = totalScore === 1000
     ? ["Excelente trabalho! Sua redação demonstrou domínio completo das cinco competências do ENEM. Continue praticando com regularidade para manter esse alto nível, ampliar seu repertório e chegar à prova com a mesma consistência."]
-    : (detail?.feedback?.improvements || competencies.filter((item) => item.melhoria).map((item) => item.melhoria));
+    : (typedImprovements.length ? typedImprovements : competencies.filter((item) => item.melhoria).map((item) => item.melhoria));
 
   function toggleComp(i: number) {
     setSelectedComp(selectedComp === i ? null : i);
@@ -1869,18 +1878,9 @@ function HistoricoView({ analyses, onSelect, onDelete, onLoadMore, hasMore }: { 
       {/* Evolution chart */}
       <div className="history-chart mb-6 p-4 rounded-2xl" style={{ background: "#16121F", border: "1px solid rgba(139,92,246,0.1)" }}>
         <h3 style={{ fontFamily: ff.display, fontSize: "0.95rem", fontWeight: 600, color: "#F7F5FB", marginBottom: 14 }}>Evolução da nota</h3>
-        <ResponsiveContainer width="100%" height={120}>
-          <LineChart data={evolution} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(109,40,217,0.12)" />
-            <XAxis dataKey="label" tick={{ fontFamily: ff.mono, fontSize: 10, fill: "#776A89" }} axisLine={false} tickLine={false} />
-            <YAxis domain={[500, 1000]} tick={{ fontFamily: ff.mono, fontSize: 10, fill: "#776A89" }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{ background: "#FFFFFF", border: "2px solid rgba(109,40,217,0.22)", borderRadius: 10, fontFamily: ff.mono, fontSize: 12, color: "#2F2341" }}
-              cursor={{ stroke: "rgba(139,92,246,0.3)" }}
-            />
-            <Line type="monotone" dataKey="nota" stroke="#8B5CF6" strokeWidth={2.5} dot={{ fill: "#8B5CF6", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "#A78BFA", strokeWidth: 0 }} />
-          </LineChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<div role="status" aria-label="Carregando gráfico" style={{ height: 120 }} />}>
+          <ScoreEvolutionChart data={evolution} />
+        </Suspense>
       </div>
 
       <div className="history-list flex flex-col gap-2.5">

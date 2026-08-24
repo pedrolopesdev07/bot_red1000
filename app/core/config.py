@@ -37,14 +37,14 @@ class Settings(BaseSettings):
     environment: str = "development"
     frontend_url: str = "http://localhost:3000"
     allowed_origins: str = "http://localhost:3000"
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://127.0.0.1:6379/0"
     session_cookie_name: str = "reda1000_session"
     session_ttl_seconds: int = Field(default=43_200, ge=300)
     magic_link_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     cookie_secure: bool = False
     cookie_samesite: str = "none"
     dev_auth_bypass: bool = False
-    auth_disabled: bool = True
+    auth_disabled: bool = False
     demo_user_email: str = "demo@reda1000.local"
     resend_api_key: str = ""
     email_from: str = "Reda1000IA <noreply@example.com>"

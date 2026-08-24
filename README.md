@@ -137,19 +137,33 @@ pytest
 python -m compileall app migrations tests
 cd frontend
 npm run typecheck
+npm test
 npm run build
+npm run test:e2e
 npm audit
 ```
 
 O pipeline do GitHub Actions reproduz os comandos principais: `pip install -e ".[dev]"`, `pytest -q`, `npm ci`, `npm run build` e `docker compose config`. O frontend também pode ser executado isoladamente com `npm run dev` dentro de `frontend/`.
 
-Os testes não acessam a API real; usam clientes simulados para JSON inválido e timeout. Para homologação, recomenda-se acrescentar testes de integração contra PostgreSQL para validar migrations e concorrência real do `UPSERT`.
+Os testes unitários não acessam provedores externos; usam clientes simulados para JSON inválido e timeout. A suíte marcada como `infrastructure` usa PostgreSQL, Redis e ARQ reais para validar migrations, concorrência de reserva, processamento completo da fila e idempotência de webhook. Ela é executada automaticamente no CI.
+
+Para executá-la localmente, inicie os serviços, aplique as migrations e habilite-a explicitamente:
+
+```powershell
+docker compose up -d postgres redis
+$env:DATABASE_URL="postgresql+asyncpg://redacao:redacao_dev@127.0.0.1:5432/redacao_db"
+$env:REDIS_URL="redis://127.0.0.1:6379/15"
+alembic upgrade head
+$env:RUN_INFRASTRUCTURE_TESTS="1"
+pytest -m infrastructure
+```
+
+O Playwright cobre Chromium desktop e mobile, ausência de overflow horizontal e violações graves ou críticas detectadas pelo axe. Na primeira execução local, instale o navegador com `npx playwright install chromium` dentro de `frontend/`.
 
 ## Limitações e próximos passos
 
-- testes PostgreSQL/Redis concorrentes precisam rodar no pipeline com containers;
 - observabilidade possui logs e correlação, mas ainda precisa de backend de métricas e rastreamento de exceções;
 - a ativação de MFA administrativo deve ser feita por procedimento operacional seguro;
 - tema/proposta da redação não são coletados separadamente, o que pode reduzir a confiança da competência 2;
-- completar os arquivos em `app/knowledge/enem` com referências oficiais vigentes e material licenciado;
+- calibrar os critérios pedagógicos com uma amostra anonimizada corrigida por avaliadores humanos;
 - elaborar termos, política de privacidade e análise de adequação à LGPD com profissionais qualificados.
