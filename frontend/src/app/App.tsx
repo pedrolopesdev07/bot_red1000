@@ -54,7 +54,9 @@ interface ApiAnalysisDetail extends ApiAnalysisSummary { text: string | null; co
 interface ApiPlan { name: string; daily_limit: number; price_cents: number; detailed_feedback: boolean; unlimited: boolean; gemini_daily_limit: number | null }
 interface ApiCreditTransaction { id: string; amount: number; balance_after: number; reason: string; description: string; created_at: string }
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
+const API_URL = (
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "")
+).replace(/\/$/, "");
 const API_TIMEOUT_MS = 75_000;
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = API_TIMEOUT_MS) {

@@ -90,6 +90,7 @@ O serviço `migrate` executa Alembic uma vez antes da API e dos workers. Em prod
 - Sessões ficam no Redis e usam identificador opaco em cookie `HttpOnly`, `SameSite=Lax` e `Secure` em produção.
 - Operações mutáveis exigem CSRF; criação de análise e checkout exigem `Idempotency-Key`.
 - CORS aceita somente os domínios listados em `ALLOWED_ORIGINS`.
+- Previews podem ser limitados ao projeto por `ALLOWED_ORIGIN_REGEX`; nunca permita genericamente todo `vercel.app` com credenciais.
 - O frontend não recebe segredos nem usa `localStorage` para autenticação.
 - Resultados do Gemini são renderizados como dados/texto, nunca como HTML cru.
 - O endpoint de listagem não retorna o texto completo da redação.

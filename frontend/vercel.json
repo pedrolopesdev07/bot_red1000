@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/api/v1/:path*", "destination": "https://bot-red1000.onrender.com/api/v1/:path*" },
+    { "source": "/health", "destination": "https://bot-red1000.onrender.com/health" },
     { "source": "/((?!assets/|favicon.ico).*)", "destination": "/index.html" }
   ],
   "headers": [

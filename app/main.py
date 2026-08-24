@@ -46,6 +46,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.allowed_origin_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "X-Request-ID", "Stripe-Signature"],
@@ -59,7 +60,7 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
         "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
     }
     origin = request.headers.get("origin")
-    if origin in settings.cors_origins:
+    if origin and settings.is_cors_origin_allowed(origin):
         headers.update({
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true", "Vary": "Origin",

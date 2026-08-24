@@ -23,7 +23,18 @@ app.reda1000ia.com  -> Vercel
 api.reda1000ia.com  -> Render
 ```
 
-Depois, atualize `VITE_API_URL`, `FRONTEND_URL`, `ALLOWED_ORIGINS`, a CSP em `frontend/vercel.json` e defina `COOKIE_SAMESITE=lax`.
+Depois, atualize `VITE_API_URL`, `FRONTEND_URL`, `ALLOWED_ORIGINS`, a CSP em `frontend/vercel.json` e defina os cookies conforme a topologia. Com frontend e API em domínios diferentes, use `COOKIE_SECURE=true` e `COOKIE_SAMESITE=none`.
+
+No Vercel, prefira remover `VITE_API_URL` (ou deixá-la vazia). O `vercel.json` encaminha `/api/v1/*` e `/health` ao Render, mantendo cookies de sessão no mesmo site do frontend. Defina `VITE_API_URL` apenas quando quiser chamar a API diretamente e assumir CORS/cookies entre sites.
+
+Para aceitar previews somente deste projeto Vercel, configure no Render uma expressão ancorada, por exemplo:
+
+```env
+ALLOWED_ORIGINS=https://bot-red1000.vercel.app
+ALLOWED_ORIGIN_REGEX=^https://bot-red1000(?:-[a-z0-9-]+)?-lopes-projects-09b60071\.vercel\.app$
+```
+
+Não use uma expressão genérica para todos os subdomínios `vercel.app`, pois as requisições CORS carregam cookies de sessão.
 
 ## Validação antes de vendas reais
 

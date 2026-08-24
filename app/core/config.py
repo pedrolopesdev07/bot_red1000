@@ -1,4 +1,5 @@
 from functools import lru_cache
+import re
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     environment: str = "development"
     frontend_url: str = "http://localhost:3000"
     allowed_origins: str = "http://localhost:3000"
+    allowed_origin_regex: str = (
+        r"^https://bot-red1000(?:-[a-z0-9-]+)?-lopes-projects-09b60071\.vercel\.app$"
+    )
     redis_url: str = "redis://127.0.0.1:6379/0"
     session_cookie_name: str = "reda1000_session"
     session_ttl_seconds: int = Field(default=43_200, ge=300)
@@ -67,6 +71,11 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
 
+    def is_cors_origin_allowed(self, origin: str) -> bool:
+        if origin in self.cors_origins:
+            return True
+        return bool(self.allowed_origin_regex and re.fullmatch(self.allowed_origin_regex, origin))
+
     @property
     def is_production(self) -> bool:
         return self.environment.casefold() == "production"
@@ -96,6 +105,20 @@ class Settings(BaseSettings):
         if normalized not in {"lax", "strict", "none"}:
             raise ValueError("COOKIE_SAMESITE deve ser lax, strict ou none")
         return normalized
+
+    @field_validator("allowed_origin_regex")
+    @classmethod
+    def valid_allowed_origin_regex(cls, value: str) -> str:
+        pattern = value.strip()
+        if not pattern:
+            return ""
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError("ALLOWED_ORIGIN_REGEX deve ser uma expressão regular válida") from exc
+        if not pattern.startswith("^https://") or not pattern.endswith("$"):
+            raise ValueError("ALLOWED_ORIGIN_REGEX deve aceitar apenas HTTPS e estar ancorada com ^ e $")
+        return pattern
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":

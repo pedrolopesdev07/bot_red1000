@@ -64,3 +64,39 @@ def test_production_accepts_secure_configuration() -> None:
         secret_key="x" * 32, allowed_origins="https://reda1000.example",
     )
     assert settings.is_production
+
+
+def test_cors_accepts_only_this_projects_vercel_previews() -> None:
+    settings = Settings(
+        allowed_origins="https://bot-red1000.vercel.app",
+        allowed_origin_regex=(
+            r"^https://bot-red1000(?:-[a-z0-9-]+)?-lopes-projects-09b60071\.vercel\.app$"
+        ),
+    )
+    assert settings.is_cors_origin_allowed("https://bot-red1000.vercel.app")
+    assert settings.is_cors_origin_allowed(
+        "https://bot-red1000-fdxernnl7-lopes-projects-09b60071.vercel.app"
+    )
+    assert not settings.is_cors_origin_allowed("https://bot-red1000-attacker.vercel.app")
+    assert not settings.is_cors_origin_allowed("https://evil.example")
+
+
+def test_cors_regex_must_be_https_and_anchored() -> None:
+    with pytest.raises(ValidationError):
+        Settings(allowed_origin_regex=r".*\.vercel\.app")
+
+
+def test_vercel_preview_preflight_returns_cors_headers() -> None:
+    origin = "https://bot-red1000-fdxernnl7-lopes-projects-09b60071.vercel.app"
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/v1/auth/login",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+    assert response.headers["access-control-allow-credentials"] == "true"

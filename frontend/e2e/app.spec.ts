@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 async function mockApi(page: Page) {
-  await page.route("http://localhost:8000/api/v1/**", async (route) => {
+  await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const payloads: Record<string, unknown> = {
       "/api/v1/me": { id: 1, created_at: "2026-01-01T00:00:00Z", username: "estudante", email: "estudante@example.com", role: "USER", plan: "FREE", bonus_credits: 150, reminders_enabled: false, csrf_token: "csrf", subscription_status: "inactive" },
