@@ -16,21 +16,6 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: float = Field(default=60, gt=0, le=180)
     min_essay_length: int = Field(default=100, ge=1)
     max_essay_length: int = Field(default=30_000, ge=100)
-    premium_daily_limit: int = Field(default=10, ge=1)
-    premium_checkout_url: str = ""
-    ultra_premium_checkout_url: str = ""
-    credits_checkout_url: str = ""
-    credits_150_checkout_url: str = ""
-    credits_270_checkout_url: str = ""
-    credits_750_checkout_url: str = ""
-    credits_1050_checkout_url: str = ""
-    cakto_webhook_secret: str = ""
-    cakto_premium_product_ids: str = ""
-    cakto_ultra_premium_product_ids: str = ""
-    cakto_credits_150_product_ids: str = ""
-    cakto_credits_270_product_ids: str = ""
-    cakto_credits_750_product_ids: str = ""
-    cakto_credits_1050_product_ids: str = ""
     reminder_poll_seconds: int = Field(default=900, ge=60)
     environment: str = "development"
     frontend_url: str = "http://localhost:3000"
@@ -49,11 +34,6 @@ class Settings(BaseSettings):
     demo_user_email: str = "demo@reda1000.local"
     resend_api_key: str = ""
     email_from: str = "Reda1000IA <noreply@example.com>"
-    stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""
-    stripe_premium_price_id: str = ""
-    stripe_ultra_premium_price_id: str = ""
-    stripe_credits_price_id: str = ""
     data_retention_days: int = Field(default=365, ge=1)
     database_pool_size: int = Field(default=10, ge=1, le=100)
     admin_allowed_ips: str = ""
@@ -85,9 +65,6 @@ class Settings(BaseSettings):
     @property
     def admin_ip_allowlist(self) -> set[str]:
         return {ip.strip() for ip in self.admin_allowed_ips.split(",") if ip.strip()}
-
-    def cakto_product_ids(self, value: str) -> set[str]:
-        return {item.strip() for item in value.split(",") if item.strip()}
 
     @field_validator("cookie_samesite")
     @classmethod

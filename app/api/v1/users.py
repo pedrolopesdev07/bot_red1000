@@ -6,7 +6,7 @@ from app.api.v1.schemas import AccountUpdate, MessageResponse, UserResponse
 from app.core.config import get_settings
 from app.core.web_security import WebSession, delete_all_user_sessions, get_current_user, get_web_session, require_csrf
 from app.database.database import get_session
-from app.database.models import Analysis, Payment, UsageDaily, User
+from app.database.models import Analysis, UsageDaily, User
 
 router = APIRouter(tags=["users"])
 
@@ -17,8 +17,7 @@ async def me(
 ) -> UserResponse:
     return UserResponse(
         id=user.id, created_at=user.created_at, username=user.username, email=user.email, role=user.role.value, plan=user.plan.name,
-        bonus_credits=user.bonus_credits, reminders_enabled=user.reminders_enabled,
-        csrf_token=session.csrf_token, subscription_status=user.subscription_status,
+        reminders_enabled=user.reminders_enabled, csrf_token=session.csrf_token,
     )
 
 
@@ -57,7 +56,6 @@ async def delete_account(
 ) -> MessageResponse:
     await db.execute(delete(Analysis).where(Analysis.user_id == user.id))
     await db.execute(delete(UsageDaily).where(UsageDaily.user_id == user.id))
-    await db.execute(delete(Payment).where(Payment.user_id == user.id))
     stored = await db.get(User, user.id)
     await db.delete(stored)
     await db.commit()

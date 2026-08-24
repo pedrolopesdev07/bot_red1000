@@ -24,7 +24,7 @@ class UserRepository:
         await self.session.flush()
         return user
 
-    async def due_credit_reminders(self) -> list[User]:
+    async def due_daily_limit_reminders(self) -> list[User]:
         last_usage = (
             select(func.max(UsageDaily.updated_at))
             .where(UsageDaily.user_id == User.id)

@@ -110,7 +110,6 @@ async def get_current_user(
                 plan=premium,
                 role=UserRole.ADMIN,
                 mfa_enabled=True,
-                bonus_credits=10,
             )
             db.add(user)
             await db.commit()

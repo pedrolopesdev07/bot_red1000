@@ -9,7 +9,7 @@ from app.core.totp import verify_totp
 from app.core.web_security import WebSession, create_web_session, delete_web_session, get_client_ip, rate_limit, require_csrf
 from app.core.redis import get_redis
 from app.database.database import SessionFactory
-from app.database.models import CreditTransaction, Plan, User, UserRole
+from app.database.models import Plan, User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -41,7 +41,7 @@ async def register(payload: RegistrationRequest, response: Response) -> MessageR
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Plano gratuito indisponível")
         user = User(
             username=payload.username, email=str(payload.email), password_hash=hash_password(payload.password),
-            plan_id=free.id, plan=free, bonus_credits=150,
+            plan_id=free.id, plan=free,
         )
         db.add(user)
         try:
@@ -49,10 +49,6 @@ async def register(payload: RegistrationRequest, response: Response) -> MessageR
         except IntegrityError as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, "Nome de usuário indisponível") from exc
         user_id = user.id
-        db.add(CreditTransaction(
-            user_id=user_id, amount=150, balance_after=150,
-            reason="WELCOME_BONUS", description="Crédito inicial para uma correção",
-        ))
     session = await create_web_session(user_id)
     _set_session_cookies(response, session)
     return MessageResponse(message="Conta criada")

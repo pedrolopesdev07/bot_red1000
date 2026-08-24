@@ -21,8 +21,8 @@ async def demo_controls(
 ) -> DemoControlsResponse:
     current = await UsageLimiter(db).status(admin)
     return DemoControlsResponse(
-        plan=admin.plan.name, bonus_credits=admin.bonus_credits, used=current.used,
-        remaining=current.remaining_label, next_credit_at=current.next_credit_at,
+        plan=admin.plan.name, used=current.used,
+        remaining=current.remaining_label, next_reset_at=current.next_reset_at,
     )
 
 
@@ -36,8 +36,6 @@ async def update_demo_controls(
         if not plan:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Plano indisponível")
         admin.plan_id, admin.plan = plan.id, plan
-    if payload.bonus_credits is not None:
-        admin.bonus_credits = payload.bonus_credits
     if payload.reset_usage:
         await db.execute(delete(UsageDaily).where(UsageDaily.user_id == admin.id))
     elif payload.used == 0:
@@ -63,14 +61,13 @@ async def update_demo_controls(
         extra={
             "admin_user_id": admin.id,
             "changed_plan": payload.plan,
-            "changed_bonus_credits": payload.bonus_credits is not None,
             "changed_usage": payload.used is not None or payload.reset_usage,
         },
     )
     current = await UsageLimiter(db).status(admin)
     return DemoControlsResponse(
-        plan=admin.plan.name, bonus_credits=admin.bonus_credits, used=current.used,
-        remaining=current.remaining_label, next_credit_at=current.next_credit_at,
+        plan=admin.plan.name, used=current.used,
+        remaining=current.remaining_label, next_reset_at=current.next_reset_at,
     )
 
 

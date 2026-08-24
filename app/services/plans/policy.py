@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.core.config import get_settings
-
-
 class PlanName(StrEnum):
     FREE = "FREE"
     PREMIUM = "PREMIUM"
@@ -26,8 +23,14 @@ def get_plan_policy(name: str, premium_daily_limit: int | None = None) -> PlanPo
         raise ValueError(f"Unsupported plan: {name}") from exc
 
     if plan is PlanName.FREE:
-        return PlanPolicy(plan, daily_analyses=1, detailed_feedback=False)
+        return PlanPolicy(plan, daily_analyses=10, detailed_feedback=True, gemini_daily_limit=2)
 
     if plan is PlanName.PREMIUM:
-        return PlanPolicy(plan, daily_analyses=5, detailed_feedback=True)
-    return PlanPolicy(plan, daily_analyses=2_147_483_647, detailed_feedback=True, unlimited=True, gemini_daily_limit=15)
+        return PlanPolicy(plan, daily_analyses=25, detailed_feedback=True, gemini_daily_limit=2)
+    return PlanPolicy(
+        plan,
+        daily_analyses=2_147_483_647,
+        detailed_feedback=True,
+        unlimited=True,
+        gemini_daily_limit=2,
+    )

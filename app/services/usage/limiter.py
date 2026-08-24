@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ class UsageLimit:
     daily_limit: int
     used: int
     unlimited: bool = False
-    next_credit_at: datetime | None = None
+    next_reset_at: datetime | None = None
 
     @property
     def remaining(self) -> int:
@@ -29,11 +29,11 @@ class UsageLimit:
     def daily_limit_label(self) -> str:
         return "∞" if self.unlimited else str(self.daily_limit)
 
-    def next_credit_label(self, now: datetime | None = None) -> str | None:
-        if self.unlimited or self.remaining or not self.next_credit_at:
+    def next_reset_label(self, now: datetime | None = None) -> str | None:
+        if self.unlimited or self.remaining or not self.next_reset_at:
             return None
         current = now or datetime.now(timezone.utc)
-        available_at = self.next_credit_at
+        available_at = self.next_reset_at
         if available_at.tzinfo is None:
             available_at = available_at.replace(tzinfo=timezone.utc)
         seconds = max(0, int((available_at - current).total_seconds()))
@@ -54,50 +54,24 @@ class UsageLimiter:
         day = day or date.today()
         effective_plan = user.plan.name
         policy = get_plan_policy(effective_plan)
-        next_credit_at = None
-        if effective_plan == "FREE":
-            last_used_at = await self.session.scalar(
-                select(func.max(UsageDaily.updated_at)).where(
-                    UsageDaily.user_id == user.id,
-                    UsageDaily.updated_at >= func.now() - text("interval '24 hours'"),
-                )
+        used = await self.session.scalar(
+            select(UsageDaily.analyses_count).where(
+                UsageDaily.user_id == user.id, UsageDaily.date == day
             )
-            used = 1 if last_used_at else 0
-            if last_used_at:
-                next_credit_at = last_used_at + timedelta(hours=24)
-        else:
-            used = await self.session.scalar(
-                select(UsageDaily.analyses_count).where(
-                    UsageDaily.user_id == user.id, UsageDaily.date == day
-                )
-            )
+        )
         return UsageLimit(
             effective_plan,
             policy.daily_analyses,
             used or 0,
             unlimited=policy.unlimited,
-            next_credit_at=next_credit_at,
+            next_reset_at=None,
         )
 
     async def consume(self, user: User, day: date | None = None) -> UsageLimit | None:
-        """Atomically reserves one analysis credit. Caller owns transaction commit/rollback."""
+        """Atomically reserves one daily analysis slot. Caller owns the transaction."""
         day = day or date.today()
         policy = get_plan_policy(user.plan.name)
         table = UsageDaily.__table__
-        if user.plan.name == "FREE":
-            # Serialize reservations per user so concurrent confirmations cannot
-            # both pass the rolling 24-hour check.
-            await self.session.execute(select(func.pg_advisory_xact_lock(user.id)))
-            used_recently = await self.session.scalar(
-                select(UsageDaily.id)
-                .where(
-                    UsageDaily.user_id == user.id,
-                    UsageDaily.updated_at >= func.now() - text("interval '24 hours'"),
-                )
-                .limit(1)
-            )
-            if used_recently is not None:
-                return None
         statement = pg_insert(table).values(user_id=user.id, date=day, analyses_count=1)
         statement = statement.on_conflict_do_update(
             index_elements=[table.c.user_id, table.c.date],

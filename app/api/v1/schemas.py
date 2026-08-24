@@ -36,10 +36,8 @@ class UserResponse(BaseModel):
     email: str | None
     role: str
     plan: str
-    bonus_credits: int
     reminders_enabled: bool
     csrf_token: str
-    subscription_status: str = "inactive"
 
 
 class AnalysisCreate(BaseModel):
@@ -88,8 +86,7 @@ class UsageResponse(BaseModel):
     limit: int | str
     used: int
     remaining: int | str
-    next_credit_at: datetime | None
-    bonus_credits: int
+    next_reset_at: datetime | None
 
 
 class PlanResponse(BaseModel):
@@ -99,6 +96,23 @@ class PlanResponse(BaseModel):
     detailed_feedback: bool
     unlimited: bool = False
     gemini_daily_limit: int | None = None
+    points_multiplier: int = 1
+    position_bonus: int = 0
+
+
+class SimulationProfileResponse(BaseModel):
+    notice: str
+    plan: str
+    simulated_position: int
+    simulated_points: int
+    position_boost: int
+    top3_until: datetime | None
+    cycle_started_at: datetime
+    disclaimer_acknowledged: bool
+
+
+class SimulationAction(BaseModel):
+    action: Literal["acknowledge", "premium", "ultra_premium", "boost_100", "boost_250", "boost_500", "boost_700", "top3_24h"]
 
 
 class ThemeResponse(BaseModel):
@@ -108,15 +122,6 @@ class ThemeResponse(BaseModel):
 class RandomThemeResponse(ThemeResponse):
     id: int | None = None
     category: str
-
-
-class CheckoutRequest(BaseModel):
-    product: Literal["premium", "ultra_premium", "credits"]
-    credit_amount: Literal[150, 270, 750, 1050] | None = None
-
-
-class CheckoutResponse(BaseModel):
-    url: str
 
 
 class AccountUpdate(BaseModel):
@@ -138,33 +143,13 @@ class AdminAnalysisSummary(AnalysisSummary):
 
 class DemoControlsResponse(BaseModel):
     plan: str
-    bonus_credits: int
     used: int
     remaining: int | str
-    next_credit_at: datetime | None
+    next_reset_at: datetime | None
 
 
 class DemoControlsUpdate(BaseModel):
     plan: Literal["FREE", "PREMIUM", "ULTRA_PREMIUM"] | None = None
-    bonus_credits: int | None = Field(default=None, ge=0, le=100_000)
     used: int | None = Field(default=None, ge=0, le=10_000)
     renewal_minutes: int | None = Field(default=None, ge=0, le=43_200)
     reset_usage: bool = False
-
-
-class CreditTransactionResponse(BaseModel):
-    id: uuid.UUID
-    amount: int
-    balance_after: int
-    reason: str
-    description: str
-    analysis_id: uuid.UUID | None
-    payment_id: uuid.UUID | None
-    created_at: datetime
-
-
-class CreditLedgerResponse(BaseModel):
-    items: list[CreditTransactionResponse]
-    page: int
-    page_size: int
-    total: int

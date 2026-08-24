@@ -41,8 +41,8 @@ interface Competencia {
   evidencias: Evidencia[];
 }
 
-interface ApiUser { id: number; created_at: string; username: string | null; email: string | null; role: string; plan: string; bonus_credits: number; reminders_enabled: boolean; csrf_token: string; subscription_status: string }
-interface ApiUsage { plan: string; limit: number | string; used: number; remaining: number | string; next_credit_at: string | null; bonus_credits: number }
+interface ApiUser { id: number; created_at: string; username: string | null; email: string | null; role: string; plan: string; reminders_enabled: boolean; csrf_token: string }
+interface ApiUsage { plan: string; limit: number | string; used: number; remaining: number | string; next_reset_at: string | null }
 interface ApiAnalysisSummary { id: string; status: string; created_at: string; completed_at: string | null; total_score: number | null; summary: string | null }
 interface CompetencyFeedback {
   score?: number;
@@ -51,8 +51,8 @@ interface CompetencyFeedback {
   improvements?: string[];
 }
 interface ApiAnalysisDetail extends ApiAnalysisSummary { text: string | null; competency_scores: Array<number | null>; feedback: Record<string, unknown> | null; detailed_feedback: boolean; topic: string | null }
-interface ApiPlan { name: string; daily_limit: number; price_cents: number; detailed_feedback: boolean; unlimited: boolean; gemini_daily_limit: number | null }
-interface ApiCreditTransaction { id: string; amount: number; balance_after: number; reason: string; description: string; created_at: string }
+interface ApiPlan { name: string; daily_limit: number; price_cents: number; detailed_feedback: boolean; unlimited: boolean; gemini_daily_limit: number | null; points_multiplier: number; position_bonus: number }
+interface SimulationProfile { notice: string; plan: string; simulated_position: number; simulated_points: number; position_boost: number; top3_until: string | null; cycle_started_at: string; disclaimer_acknowledged: boolean }
 
 const API_URL = (
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "")
@@ -101,7 +101,7 @@ export function displayIdentity(user: ApiUser | null) {
   return { name, email, initials };
 }
 
-export function dailyRanking(analyses: ApiAnalysisSummary[], accountCreatedAt: string, now = Date.now()) {
+export function dailyRanking(analyses: ApiAnalysisSummary[], accountCreatedAt: string, plan = "FREE", savedPosition?: number, now = Date.now()) {
   const cycleDuration = 7 * 86_400_000;
   const createdAt = new Date(accountCreatedAt).getTime();
   const validCreatedAt = Number.isFinite(createdAt) ? createdAt : now;
@@ -120,12 +120,21 @@ export function dailyRanking(analyses: ApiAnalysisSummary[], accountCreatedAt: s
   }));
   const completed = analyses.filter((item) => item.status === "COMPLETED" && item.total_score !== null && new Date(item.created_at).getTime() >= cycleStart);
   const activeDays = new Set(completed.map((item) => new Date(item.created_at).toISOString().slice(0, 10))).size;
-  const rankingScore = activeDays >= 7
-    ? Math.max(0, completed.reduce((total, item) => total + (Number(item.total_score) === 1000 ? 15 : Number(item.total_score) < 600 ? -30 : 0), 0))
-    : 0;
-  const activityGain = Math.floor(rankingScore / 15) * 45;
-  const startingPosition = 1100 + Math.abs((day * 137) % 401);
-  const userPosition = Math.max(800, Math.min(1500, startingPosition - activityGain));
+  const multiplier = plan === "ULTRA_PREMIUM" ? 10 : plan === "PREMIUM" ? 2 : 1;
+  const extraPositions = plan === "ULTRA_PREMIUM" ? 25 : plan === "PREMIUM" ? 10 : 0;
+  const basePoints = completed.reduce((total, item) => total + Math.max(10, Math.round(Number(item.total_score) / 10)), 0);
+  const rankingScore = basePoints * multiplier;
+  const startingPosition = 15_000 + Math.abs((day * 137) % 5_001);
+  const earnedPosition = startingPosition - completed.length * (35 + extraPositions);
+  let userPosition = savedPosition !== undefined && savedPosition <= 3
+    ? savedPosition
+    : Math.max(4, Math.min(savedPosition ?? startingPosition, earnedPosition));
+  const isLastDay = cycleEndsAt - now <= 86_400_000;
+  if (isLastDay && userPosition <= 3) userPosition = 4;
+  userPosition = Math.max(isLastDay ? 4 : 3, userPosition);
+  if (userPosition <= 10) {
+    leaders.forEach((leader, index) => { leader.score = rankingScore * 2 + 300 - index * 50; });
+  }
   const user = { name: "Você", pos: userPosition, score: rankingScore, essays: completed.length, current: true };
   return { leaders, others, user, activeDays, cycleEndsAt };
 }
@@ -156,7 +165,7 @@ const USER = {
   nome: "Maria Oliveira",
   email: "maria.oliveira@email.com",
   iniciais: "MO",
-  creditos: 7,
+  correcoes: 7,
   plano: "Pro",
   isAdmin: true,
   totalRedacoes: 5,
@@ -343,18 +352,18 @@ const PROCESSING_STEPS = [
 
 const HOME_CAROUSEL = [
   "A nota que você quer começa no rascunho que você ainda não escreveu.",
-  "Treine nesta semana e dispute 3 meses de Netflix + 1 mês de CapCut Pro!",
+  "Simule uma disputa de sete dias e observe a progressão manipulada do ranking.",
   "Quem treina hoje chega à prova com argumento, repertório e confiança.",
-  "Chegue ao 2º lugar e ganhe 3 meses de Disney+.",
+  "Ambiente de teste: nenhum prêmio ou pagamento é real.",
   "Texto perfeito não nasce pronto. Nasce escrito, corrigido e reescrito.",
   "O 3º lugar da semana leva 1 mês de Crunchyroll.",
   "O top 10 não espera inspiração: escreva, envie e melhore toda semana.",
 ];
 
 const RANKING_PRIZES = [
-  { place: "1º lugar", title: "Netflix + CapCut Pro", detail: "3 meses de Netflix + 1 mês de CapCut Pro", medal: "🥇", logos: [{ name: "Netflix", kind: "netflix", mark: "N" }, { name: "CapCut Pro", kind: "capcut", mark: "✂" }] },
-  { place: "2º lugar", title: "Disney+", detail: "3 meses de Disney+", medal: "🥈", logos: [{ name: "Disney+", kind: "disney", mark: "Disney+" }] },
-  { place: "3º lugar", title: "Crunchyroll", detail: "1 mês de Crunchyroll", medal: "🥉", logos: [{ name: "Crunchyroll", kind: "crunchyroll", mark: "◉" }] },
+  { place: "1º lugar", title: "R$ 500", detail: "Prêmio fictício", medal: "🥇", logos: [] },
+  { place: "2º lugar", title: "R$ 150", detail: "Prêmio fictício", medal: "🥈", logos: [] },
+  { place: "3º lugar", title: "R$ 50 + streaming", detail: "3 meses fictícios de Netflix e Disney+", medal: "🥉", logos: [] },
 ];
 
 const HOME_MILESTONES = [
@@ -502,15 +511,15 @@ function CompBar({ comp, selected, onSelect }: { comp: Competencia; selected: bo
   );
 }
 
-function CreditBadge({ credits }: { credits: number }) {
+function CorrectionBadge({ remaining }: { remaining: number }) {
   return (
     <div
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
       style={{ background: "rgba(255,122,69,0.12)", border: "1px solid rgba(255,122,69,0.22)" }}
     >
       <Zap size={13} style={{ color: "#FF7A45" }} />
-      <span style={{ fontFamily: ff.mono, fontSize: "0.8rem", fontWeight: 600, color: "#2F2341" }}>{credits}</span>
-      <span style={{ fontFamily: ff.body, fontSize: "0.72rem", color: "#655A76" }}>créditos</span>
+      <span style={{ fontFamily: ff.mono, fontSize: "0.8rem", fontWeight: 600, color: "#2F2341" }}>{remaining} correções</span>
+      <span style={{ fontFamily: ff.body, fontSize: "0.72rem", color: "#655A76" }}>restantes</span>
     </div>
   );
 }
@@ -548,7 +557,7 @@ function FuturoBadge() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
-function TopNav({ view, onNav, onLogout, credits, initials, username }: { view: View; onNav: (v: View) => void; onLogout: () => void; credits: number; initials: string; username: string }) {
+function TopNav({ view, onNav, onLogout, remaining, initials, username }: { view: View; onNav: (v: View) => void; onLogout: () => void; remaining: number; initials: string; username: string }) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const links: { id: View; label: string }[] = [
@@ -609,7 +618,7 @@ function TopNav({ view, onNav, onLogout, credits, initials, username }: { view: 
       </nav>
 
       <div className="flex items-center gap-3">
-        <CreditBadge credits={credits} />
+        <CorrectionBadge remaining={remaining} />
         <div ref={profileMenuRef} className="relative">
           <button
             type="button" aria-label="Abrir menu do perfil" aria-haspopup="menu" aria-expanded={profileMenuOpen}
@@ -916,8 +925,8 @@ function DashboardView({ onNav }: { onNav: (v: View) => void }) {
         </h1>
         <p style={{ fontFamily: ff.body, fontSize: "0.9rem", color: "#9D94AC", marginTop: 2 }}>
           Você tem{" "}
-          <strong style={{ color: "#8B5CF6", fontFamily: ff.mono }}>{USER.creditos}</strong>{" "}
-          créditos disponíveis no plano{" "}
+          <strong style={{ color: "#8B5CF6", fontFamily: ff.mono }}>{USER.correcoes}</strong>{" "}
+          correções disponíveis no plano{" "}
           <strong style={{ color: "#8B5CF6" }}>{USER.plano}</strong>
         </p>
       </div>
@@ -1043,7 +1052,7 @@ function DashboardV2({ onNav }: { onNav: (v: View) => void }) {
       <div className="home-welcome">
         <h1>Olá, Maria 👋</h1>
         <p>
-          Você tem <strong>{USER.creditos} créditos</strong> disponíveis no plano <strong>{USER.plano}</strong>.
+          Você tem <strong>{USER.correcoes} correções</strong> disponíveis no plano <strong>{USER.plano}</strong>.
         </p>
       </div>
 
@@ -1055,7 +1064,7 @@ function DashboardV2({ onNav }: { onNav: (v: View) => void }) {
               <h2>Escreva agora. Evolua a cada texto.</h2>
               <p>Cole ou escreva sua redação e receba uma correção completa em segundos.</p>
             </div>
-            <CreditBadge credits={USER.creditos} />
+            <CorrectionBadge remaining={USER.correcoes} />
           </div>
 
           <div className="home-topic">
@@ -1088,7 +1097,7 @@ function DashboardV2({ onNav }: { onNav: (v: View) => void }) {
               <span className="home-cta-shine" />
               <Sparkles size={20} />
               <span>{canSubmit ? "Corrigir minha redação" : "Escreva para liberar a correção"}</span>
-              <small>1 crédito</small>
+              <small>1 correção</small>
             </button>
           </div>
         </section>
@@ -1150,7 +1159,7 @@ function DashboardV2({ onNav }: { onNav: (v: View) => void }) {
   );
 }
 
-function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit, onSelectAnalysis }: { onNav: (v: View) => void; usage: ApiUsage | null; analyses: ApiAnalysisSummary[]; theme: string; accountCreatedAt: string; onSubmit: (text: string, topicId: number | null, customTopic: string | null) => Promise<void>; onSelectAnalysis: (id: string) => void }) {
+function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, simulation, onSubmit, onSelectAnalysis }: { onNav: (v: View) => void; usage: ApiUsage | null; analyses: ApiAnalysisSummary[]; theme: string; accountCreatedAt: string; simulation: SimulationProfile | null; onSubmit: (text: string, topicId: number | null, customTopic: string | null) => Promise<void>; onSelectAnalysis: (id: string) => void }) {
   const [homeText, setHomeText] = useState("");
   const [messageIndex, setMessageIndex] = useState(0);
   const [rankingNow, setRankingNow] = useState(Date.now());
@@ -1169,7 +1178,7 @@ function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit
   const unlockedMilestones = HOME_MILESTONES.filter((item) => charCount >= item.min).length;
   const completed = analyses.filter((item) => item.status === "COMPLETED" && item.total_score !== null);
   const average = completed.length ? Math.round(completed.reduce((sum, item) => sum + Number(item.total_score), 0) / completed.length) : 0;
-  const ranking = dailyRanking(analyses, accountCreatedAt, rankingNow);
+  const ranking = dailyRanking(analyses, accountCreatedAt, usage?.plan, simulation?.simulated_position, rankingNow);
   const countdownSeconds = Math.max(0, Math.ceil((ranking.cycleEndsAt - rankingNow) / 1000));
   const countdownDays = Math.floor(countdownSeconds / 86400);
   const countdownHours = Math.floor((countdownSeconds % 86400) / 3600);
@@ -1221,7 +1230,7 @@ function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit
   return (
     <div className="home-page app-page">
       <section className="home-motivation" aria-live="polite">
-        <img className="home-motivation-art" src="/images/ranking-prizes-banner.png" alt="Top 3 premiado: primeiro lugar Netflix e CapCut Pro, segundo lugar Disney+, terceiro lugar Crunchyroll" />
+        <img className="home-motivation-art" src="/images/ranking-simulation-banner.png" alt="Banner do desafio fictício, claramente identificado como simulação sem prêmios ou pagamentos reais" />
         <div className="home-motivation-footer">
           <div className="home-banner-copy">
             <span>MOTIVAÇÃO DA VEZ</span>
@@ -1244,7 +1253,7 @@ function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit
               <h2>Sua próxima correção pode virar um novo recorde.</h2>
               <p>Abra o texto aqui mesmo, ganhe ritmo e envie assim que sua tese estiver pronta.</p>
             </div>
-            <CreditBadge credits={usage?.bonus_credits || 0} />
+            <span className="home-eyebrow"><Zap size={16} /> {String(usage?.remaining ?? "—")} CORREÇÕES RESTANTES</span>
           </div>
 
           <div className="home-start-options">
@@ -1327,7 +1336,7 @@ function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit
               aria-disabled={!canSubmit}
             >
               <span className="home-cta-shine" />
-              <span>{canSubmit ? (usage?.remaining === "∞" || Number(usage?.remaining || 0) > 0 ? "Usar correção do plano" : "Usar 150 créditos e corrigir") : "Escreva 100 caracteres para liberar"}</span>
+              <span>{canSubmit ? "Usar correção do plano" : "Escreva 100 caracteres para liberar"}</span>
               <small>{canSubmit ? "feedback completo" : "destrave o envio"}</small>
             </button>
           </div>
@@ -1383,16 +1392,13 @@ function DashboardV3({ onNav, usage, analyses, theme, accountCreatedAt, onSubmit
             <div className="home-prizes-pitch">
               <span><Sparkles size={13} /> TOP 3 PREMIADO</span>
               <strong>Seu treino pode virar entretenimento.</strong>
-              <small>Escreva, some pontos e dispute os prêmios da semana.</small>
+              <small>Simulação manipulada: posições e prêmios não são reais.</small>
             </div>
             <div className="home-ranking-prizes" aria-label={`Prêmios da semana: ${RANKING_PRIZES.map((prize) => `${prize.place}, ${prize.detail}`).join("; ")}`}>
               <div className="home-ranking-prizes-track">
                 {RANKING_PRIZES.map((prize, index) => (
                   <article className={`home-prize-card is-place-${index + 1}`} key={prize.place}>
                     <b className="home-prize-medal">{prize.medal}</b>
-                    <div className="home-prize-logos">
-                      {prize.logos.map((logo) => <span key={logo.name} className={`home-brand-mark is-${logo.kind}`} aria-label={logo.name}>{logo.mark}</span>)}
-                    </div>
                     <div className="home-prize-copy">
                       <small>{prize.place}</small>
                       <strong>{prize.title}</strong>
@@ -1575,7 +1581,7 @@ function NovaRedacaoView({ onNav }: { onNav: (v: View) => void }) {
           cursor: canSubmit ? "pointer" : "not-allowed",
         }}
       >
-        <Sparkles size={18} /> Enviar para correção — 1 crédito
+        <Sparkles size={18} /> Enviar para correção
       </button>
 
       {!canSubmit && (
@@ -1921,49 +1927,29 @@ function HistoricoView({ analyses, onSelect, onDelete, onLoadMore, hasMore }: { 
   );
 }
 
-const PLANOS = [
-  {
-    id: "free", nome: "Gratuito", preco: "R$ 0", periodo: "/mês", creditos: 3,
-    cor: "#9D94AC", current: false,
-    features: ["3 correções por mês", "Nota por competência", "Feedback básico", "Histórico dos últimos 10"],
-  },
-  {
-    id: "pro", nome: "Pro", preco: "R$ 29,90", periodo: "/mês", creditos: 20,
-    cor: "#8B5CF6", current: true,
-    features: ["20 correções por mês", "Feedback completo com evidências", "Próximos passos personalizados", "Histórico ilimitado", "Suporte por e-mail"],
-  },
-  {
-    id: "premium", nome: "Premium", preco: "R$ 79,90", periodo: "/mês", creditos: -1,
-    cor: "#4ADE80", current: false,
-    features: ["Correções ilimitadas", "Tudo do Pro incluso", "Análise de evolução semanal", "Temas exclusivos antecipados", "Suporte prioritário"],
-  },
-];
-
-function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiUsage | null; csrfToken: string }) {
-  const [tab, setTab] = useState<"planos" | "avulso">("planos");
-  const [checkoutError, setCheckoutError] = useState("");
-  const [ledger, setLedger] = useState<ApiCreditTransaction[]>([]);
-  useEffect(() => { api<{ items: ApiCreditTransaction[] }>("/api/v1/credits/transactions?page_size=10").then((result) => setLedger(result.items)).catch(() => setLedger([])); }, []);
+function PlanosView({ plans, usage, csrfToken, onSimulationChanged }: { plans: ApiPlan[]; usage: ApiUsage | null; csrfToken: string; onSimulationChanged: () => Promise<void> }) {
+  const [tab, setTab] = useState<"planos" | "hacks">("planos");
+  const [actionMessage, setActionMessage] = useState("");
   const displayedPlans = plans.map((plan) => ({
-    id: plan.name.toLowerCase(), nome: plan.name.replace("_", " "),
-    preco: plan.price_cents ? (plan.price_cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "R$ 0", periodo: "/mês",
-    creditos: plan.unlimited ? -1 : plan.daily_limit, cor: plan.name === "ULTRA_PREMIUM" ? "#FFD600" : plan.name === "PREMIUM" ? "#4ADE80" : "#9D94AC", current: usage?.plan === plan.name,
+    id: plan.name.toLowerCase(), nome: plan.name === "FREE" ? "Básico" : plan.name.replace("_", " "),
+    preco: plan.price_cents ? (plan.price_cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "Acesso incluído", periodo: "",
+    correcoes: plan.unlimited ? -1 : plan.daily_limit, cor: plan.name === "ULTRA_PREMIUM" ? "#FFD600" : plan.name === "PREMIUM" ? "#4ADE80" : "#9D94AC", current: usage?.plan === plan.name,
     features: plan.name === "FREE"
-      ? ["1 correção por dia", "Nota completa por competência", "Sem evidências e pontos de melhoria"]
+      ? ["10 correções por dia", "Feedback completo", "Motor local a partir da 3ª correção"]
       : plan.name === "PREMIUM"
-        ? ["5 correções por dia", "Feedback e evidências completos", "Pontos de melhoria liberados"]
-        : ["Correções ilimitadas", "Feedback e evidências completos", "Pontos de melhoria liberados", "Histórico completo de evolução"],
+        ? ["25 correções por dia", "Tudo do Básico", "2x pontos simulados", "+10 posições por correção"]
+        : ["Correções ilimitadas", "Tudo do Premium", "10x pontos simulados", "+25 posições por correção"],
     destaque: plan.name === "PREMIUM" ? "RECOMENDADO" : plan.name === "ULTRA_PREMIUM" ? "MÁXIMA PERFORMANCE" : null,
-    chamada: plan.name === "FREE" ? "Comece sem compromisso" : plan.name === "PREMIUM" ? "Evolua com constância" : "Treine sem limites",
-    precoRegular: plan.name === "PREMIUM" ? "R$ 69,99" : plan.name === "ULTRA_PREMIUM" ? "R$ 259,99" : null,
-    desconto: plan.name === "PREMIUM" ? "43% OFF" : plan.name === "ULTRA_PREMIUM" ? "62% OFF" : null,
+    chamada: plan.name === "FREE" ? "Incluído no acesso comprado" : plan.name === "PREMIUM" ? "Vantagem simulada" : "Máxima vantagem simulada",
+    precoRegular: null, desconto: null,
   }));
-  async function startCheckout(product: "premium" | "ultra_premium" | "credits", creditAmount?: 150 | 270 | 750 | 1050) {
+  async function runSimulationAction(action: "premium" | "ultra_premium" | "boost_100" | "boost_250" | "boost_500" | "boost_700" | "top3_24h") {
     try {
-      setCheckoutError("");
-      const result = await api<{ url: string }>("/api/v1/billing/checkout", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ product, credit_amount: creditAmount }) }, csrfToken);
-      window.location.assign(result.url);
-    } catch (error) { setCheckoutError(error instanceof Error ? error.message : "Checkout indisponível"); }
+      setActionMessage("");
+      await api<SimulationProfile>("/api/v1/simulation/action", { method: "POST", body: JSON.stringify({ action }) }, csrfToken);
+      setActionMessage("Ação fictícia aplicada. Nenhuma cobrança foi realizada.");
+      await onSimulationChanged();
+    } catch (error) { setActionMessage(error instanceof Error ? error.message : "Simulação indisponível"); }
   }
 
   return (
@@ -1972,15 +1958,15 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
         <div>
           <span><Crown size={15} /> EVOLUA SEM LIMITES</span>
           <h1 style={{ fontFamily: ff.display, fontSize: "1.55rem", fontWeight: 700, color: "#F7F5FB" }}>Escolha seu plano</h1>
-          <p className="plans-intro">Mais treinos, feedbacks completos e evolução constante até a nota 1000.</p>
+          <p className="plans-intro">Planos e preços fictícios para testar limites e progressão.</p>
         </div>
         <p style={{ fontFamily: ff.body, fontSize: "0.84rem", color: "#9D94AC", marginTop: 2 }}>
-          Plano atual: <strong style={{ color: "#8B5CF6" }}>{usage?.plan?.replace("_", " ") || "—"}</strong> · {String(usage?.remaining ?? "—")} correções do plano · {usage?.bonus_credits || 0} créditos
+          Plano atual: <strong style={{ color: "#8B5CF6" }}>{usage?.plan === "FREE" ? "BÁSICO" : usage?.plan?.replace("_", " ") || "—"}</strong> · {String(usage?.remaining ?? "—")} correções restantes
         </p>
       </div>
 
       <div className="plans-tabs flex gap-1 mb-6 p-1 rounded-xl" style={{ background: "#16121F" }}>
-        {[{ id: "planos" as const, label: "Assinaturas" }, { id: "avulso" as const, label: "Créditos avulsos" }].map((t) => (
+        {[{ id: "planos" as const, label: "Vantagens" }, { id: "hacks" as const, label: "Hacks simulados" }].map((t) => (
           <button
             key={t.id} onClick={() => setTab(t.id)}
             className="flex-1 py-2 rounded-lg text-sm transition-all duration-200"
@@ -2015,7 +2001,7 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
                 <span style={{ fontFamily: ff.body, fontSize: "0.84rem", color: "#9D94AC" }}>{p.periodo}</span>
               </div>
               <p style={{ fontFamily: ff.mono, fontSize: "0.82rem", color: p.cor, marginBottom: 14 }}>
-                {p.creditos === -1 ? "Correções ilimitadas" : `${p.creditos} ${p.creditos === 1 ? "correção" : "correções"} por dia`}
+                {p.correcoes === -1 ? "Correções ilimitadas" : `${p.correcoes} correções por dia`}
               </p>
               <ul className="flex flex-col gap-2 mb-5">
                 {p.features.map((f, i) => (
@@ -2027,7 +2013,7 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
               </ul>
               {(!p.current || p.id === "premium") && (
                 <button
-                  onClick={() => p.id !== "free" && startCheckout(p.id === "ultra_premium" ? "ultra_premium" : "premium")}
+                  onClick={() => p.id !== "free" && runSimulationAction(p.id === "ultra_premium" ? "ultra_premium" : "premium")}
                   disabled={p.id === "free"}
                   className="plan-cta w-full py-2.5 rounded-xl transition-all duration-200 active:scale-[0.98]"
                   style={{
@@ -2035,7 +2021,7 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
                     background: p.id === "premium" ? "linear-gradient(135deg, #166534, #4ADE80)" : p.id === "free" ? "#1C1729" : "linear-gradient(135deg, #5B21B6, #8B5CF6)",
                   }}
                 >
-                  {p.id === "free" ? "Plano gratuito" : p.id === "premium" ? "Assinar Premium" : "Assinar agora"}
+                  {p.id === "free" ? "Acesso básico incluído" : "Ativar na simulação"}
                 </button>
               )}
             </div>
@@ -2043,55 +2029,24 @@ function PlanosView({ plans, usage, csrfToken }: { plans: ApiPlan[]; usage: ApiU
         </div>
       )}
 
-      {tab === "avulso" && (
-        <div className="credit-packs flex flex-col gap-3">
-          <p style={{ fontFamily: ff.body, fontSize: "0.84rem", color: "#9D94AC", marginBottom: 4 }}>
-            Cada correção Premium custa 150 créditos. Os créditos não expiram.
-          </p>
+      {tab === "hacks" && (
+        <div className="hack-packs flex flex-col gap-3">
+          <div role="alert" className="p-4 rounded-xl" style={{ background: "#FEF3C7", color: "#78350F", border: "2px solid #F59E0B", fontWeight: 800 }}>
+            SIMULAÇÃO MANIPULADA PARA TESTES — estes valores não são cobrados e as posições não representam participantes reais.
+          </div>
           {[
-            { qtd: 150 as const, preco: "R$ 9,99", popular: false, economia: null },
-            { qtd: 270 as const, preco: "R$ 17,98", popular: false, economia: null },
-            { qtd: 750 as const, preco: "R$ 49,95", popular: true, economia: null },
-            { qtd: 1050 as const, preco: "R$ 69,93", popular: false, economia: null },
-          ].map((pack) => (
-            <div
-              key={pack.qtd}
-              className={`credit-pack ${pack.popular ? "is-popular" : ""} flex items-center justify-between p-4 rounded-xl`}
-              style={{ background: "#16121F", border: `1px solid ${pack.popular ? "rgba(139,92,246,0.4)" : "rgba(139,92,246,0.1)"}` }}
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span style={{ fontFamily: ff.display, fontSize: "1.05rem", fontWeight: 600, color: "#F7F5FB" }}>
-                    {pack.qtd} crédito{pack.qtd > 1 ? "s" : ""}
-                  </span>
-                  {pack.popular && (
-                    <span className="px-2 py-0.5 rounded-full" style={{ fontFamily: ff.body, fontSize: "0.62rem", fontWeight: 700, color: "#8B5CF6", background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)" }}>
-                      Mais popular
-                    </span>
-                  )}
-                </div>
-                {pack.economia && (
-                  <p style={{ fontFamily: ff.body, fontSize: "0.72rem", color: "#4ADE80", marginTop: 2 }}>{pack.economia}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <span style={{ fontFamily: ff.mono, fontSize: "1rem", fontWeight: 700, color: "#F7F5FB" }}>{pack.preco}</span>
-                <button
-                  onClick={() => startCheckout("credits", pack.qtd)}
-                  className="px-3.5 py-1.5 rounded-lg active:scale-95 transition-transform"
-                  style={{ fontFamily: ff.display, fontSize: "0.84rem", fontWeight: 600, color: "#F7F5FB", background: "linear-gradient(135deg, #5B21B6, #8B5CF6)" }}
-                >
-                  Comprar
-                </button>
-              </div>
+            { action: "boost_100" as const, label: "Subir 100 posições", price: "R$ 5,99" },
+            { action: "boost_250" as const, label: "Subir 250 posições", price: "R$ 7,99" },
+            { action: "boost_500" as const, label: "Subir 500 posições", price: "R$ 15,99" },
+            { action: "boost_700" as const, label: "Subir 700 posições", price: "R$ 20,99" },
+            { action: "top3_24h" as const, label: "Simular top 3 por 24h", price: "R$ 25,99" },
+          ].map((hack) => (
+            <div key={hack.action} className="hack-pack flex items-center justify-between gap-4 p-4 rounded-xl" style={{ background: "#16121F", border: "1px solid rgba(139,92,246,0.25)" }}>
+              <div><strong style={{ color: "#F7F5FB" }}>{hack.label}</strong><small style={{ display: "block", color: "#F59E0B" }}>Ação fictícia e manipulada</small></div>
+              <div className="flex items-center gap-3"><strong style={{ color: "#F7F5FB" }}>{hack.price}</strong><button onClick={() => runSimulationAction(hack.action)} className="px-4 py-2 rounded-lg text-white font-bold" style={{ background: "#6D28D9" }}>Simular</button></div>
             </div>
           ))}
-          {checkoutError && <p style={{ color: "#F87171", fontSize: ".8rem" }}>{checkoutError}</p>}
-          <div className="mt-5 p-4 rounded-xl" style={{ background: "#fff", border: "1px solid rgba(109,40,217,.14)" }}>
-            <h3 style={{ marginBottom: ".7rem" }}>Extrato de créditos</h3>
-            {ledger.map((item) => <div key={item.id} className="flex justify-between gap-3 py-2 border-t" style={{ fontSize: ".78rem" }}><span>{item.description}<small style={{ display: "block", color: "#9589a5" }}>{new Date(item.created_at).toLocaleDateString("pt-BR")}</small></span><strong style={{ color: item.amount >= 0 ? "#16a34a" : "#dc2626" }}>{item.amount > 0 ? "+" : ""}{item.amount}</strong></div>)}
-            {!ledger.length && <p style={{ color: "#9589a5", fontSize: ".78rem" }}>Nenhuma movimentação registrada.</p>}
-          </div>
+          {actionMessage && <p role="status" style={{ color: "#4ADE80", fontWeight: 700 }}>{actionMessage}</p>}
         </div>
       )}
     </div>
@@ -2128,7 +2083,7 @@ function PerfilView({ onNav, user, usage, analyses, onToggleReminders, onLogout,
           { label: "Redações enviadas", value: analyses.length, Icon: FileText },
           { label: "Nota média", value: `${average} pts`, Icon: TrendingUp },
           { label: "Melhor nota", value: `${best} pts`, Icon: Trophy },
-          { label: "Saldo de créditos", value: String(usage?.bonus_credits ?? 0), Icon: Zap },
+          { label: "Correções restantes", value: String(usage?.remaining ?? 0), Icon: Zap },
         ].map((s) => (
           <div key={s.label} className="profile-stat p-3 rounded-xl" style={{ background: "#16121F", border: "1px solid rgba(139,92,246,0.1)" }}>
             <s.Icon size={14} style={{ color: "#8B5CF6", marginBottom: 6 }} />
@@ -2140,7 +2095,7 @@ function PerfilView({ onNav, user, usage, analyses, onToggleReminders, onLogout,
 
       <div className="profile-menu flex flex-col gap-2 mb-6">
         {[
-          { Icon: CreditCard, label: "Planos e créditos", action: () => onNav("planos") },
+          { Icon: CreditCard, label: "Vantagens de teste", action: () => onNav("planos") },
           { Icon: Bell, label: `Notificações: ${user?.reminders_enabled ? "ativadas" : "desativadas"}`, action: onToggleReminders },
           ...(user?.role === "ADMIN" ? [{ Icon: Shield, label: "Painel administrativo", action: () => onNav("admin") }] : []),
           { Icon: LogOut, label: "Sair da conta", action: onLogout },
@@ -2350,23 +2305,22 @@ function AdminView({ onNav }: { onNav: (v: View) => void }) {
 function RealAdminView({ onNav, csrfToken, onProfileChanged }: { onNav: (v: View) => void; csrfToken: string; onProfileChanged: () => Promise<void> }) {
   type AdminUser = { id: number; email: string; plan: string; is_active: boolean; created_at: string };
   type AdminAnalysis = { id: string; user_id: number; status: string; total_score: number | null; summary: string | null; created_at: string };
-  type DemoControls = { plan: "FREE" | "PREMIUM" | "ULTRA_PREMIUM"; bonus_credits: number; used: number; remaining: number | string; next_credit_at: string | null };
+  type DemoControls = { plan: "FREE" | "PREMIUM" | "ULTRA_PREMIUM"; used: number; remaining: number | string; next_reset_at: string | null };
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [rows, setRows] = useState<AdminAnalysis[]>([]);
   const [controls, setControls] = useState<DemoControls | null>(null);
-  const [creditInput, setCreditInput] = useState("0");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     Promise.all([api<AdminUser[]>("/api/v1/admin/users?page_size=50"), api<AdminAnalysis[]>("/api/v1/admin/analyses?page_size=50"), api<DemoControls>("/api/v1/admin/demo-controls")])
-      .then(([nextUsers, nextRows, nextControls]) => { setUsers(nextUsers); setRows(nextRows); setControls(nextControls); setCreditInput(String(nextControls.bonus_credits)); })
+      .then(([nextUsers, nextRows, nextControls]) => { setUsers(nextUsers); setRows(nextRows); setControls(nextControls); })
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Painel indisponível"));
   }, []);
-  async function updateControls(payload: { plan?: DemoControls["plan"]; bonus_credits?: number }) {
+  async function updateControls(payload: { plan?: DemoControls["plan"] }) {
     try {
       setSaving(true); setError("");
       const next = await api<DemoControls>("/api/v1/admin/demo-controls", { method: "PATCH", body: JSON.stringify(payload) }, csrfToken);
-      setControls(next); setCreditInput(String(next.bonus_credits)); await onProfileChanged();
+      setControls(next); await onProfileChanged();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível alterar o perfil"); }
     finally { setSaving(false); }
   }
@@ -2379,11 +2333,7 @@ function RealAdminView({ onNav, csrfToken, onProfileChanged }: { onNav: (v: View
     {controls && <section className="bg-white border rounded-2xl p-4 mb-6">
       <h2 className="font-bold mb-3">Meu perfil de testes</h2>
       <div className="flex flex-wrap gap-2 mb-4">{(["FREE", "PREMIUM", "ULTRA_PREMIUM"] as const).map((plan) => <button key={plan} disabled={saving} onClick={() => updateControls({ plan })} className="px-4 py-2 rounded-xl border font-semibold" style={{ background: controls.plan === plan ? "#6D28D9" : "#fff", color: controls.plan === plan ? "#fff" : "#4C1D95" }}>{plan.replace("_", " ")}</button>)}</div>
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="text-sm font-semibold">Créditos extras<input type="number" min="0" max="100000" value={creditInput} onChange={(event) => setCreditInput(event.target.value)} className="block mt-1 px-3 py-2 rounded-xl border w-40" /></label>
-        <button disabled={saving} onClick={() => updateControls({ bonus_credits: Math.max(0, Math.min(100000, Number(creditInput) || 0)) })} className="px-4 py-2 rounded-xl bg-purple-700 text-white font-semibold">Salvar créditos</button>
-        <button disabled={saving} onClick={() => updateControls({ plan: "ULTRA_PREMIUM" })} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold">Créditos infinitos</button>
-      </div>
+      <button disabled={saving} onClick={() => updateControls({ plan: "ULTRA_PREMIUM" })} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-semibold">Correções ilimitadas</button>
       <p className="mt-3 text-sm text-slate-500">Plano atual: {controls.plan.replace("_", " ")} · Restantes: {String(controls.remaining)} · Usados hoje: {controls.used}</p>
     </section>}
     <section className="bg-white border rounded-2xl overflow-hidden mb-6"><h2 className="p-4 font-bold">Usuários recentes</h2>{users.map((user) => <div key={user.id} className="grid grid-cols-3 gap-3 p-3 border-t text-sm"><span className="truncate">{user.email}</span><span>{user.plan}</span><span>{new Date(user.created_at).toLocaleDateString("pt-BR")}</span></div>)}</section>
@@ -2398,6 +2348,7 @@ export default function App() {
   const [analyses, setAnalyses] = useState<ApiAnalysisSummary[]>([]);
   const [analysesTotal, setAnalysesTotal] = useState(0);
   const [plans, setPlans] = useState<ApiPlan[]>([]);
+  const [simulation, setSimulation] = useState<SimulationProfile | null>(null);
   const [theme, setTheme] = useState("");
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ApiAnalysisDetail | null>(null);
@@ -2406,10 +2357,10 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     try {
-      const [nextUser, nextUsage, history, nextPlans, weekly] = await Promise.all([
-        api<ApiUser>("/api/v1/me"), api<ApiUsage>("/api/v1/usage"), api<{ items: ApiAnalysisSummary[]; total: number }>("/api/v1/analyses?page_size=50"), api<ApiPlan[]>("/api/v1/plans"), api<{ theme: string }>("/api/v1/theme"),
+      const [nextUser, nextUsage, history, nextPlans, weekly, nextSimulation] = await Promise.all([
+        api<ApiUser>("/api/v1/me"), api<ApiUsage>("/api/v1/usage"), api<{ items: ApiAnalysisSummary[]; total: number }>("/api/v1/analyses?page_size=50"), api<ApiPlan[]>("/api/v1/plans"), api<{ theme: string }>("/api/v1/theme"), api<SimulationProfile>("/api/v1/simulation/profile"),
       ]);
-      setUser(nextUser); setUsage(nextUsage); setAnalyses(history.items); setAnalysesTotal(history.total); setPlans(nextPlans); setTheme(weekly.theme); setError("");
+      setUser(nextUser); setUsage(nextUsage); setAnalyses(history.items); setAnalysesTotal(history.total); setPlans(nextPlans); setTheme(weekly.theme); setSimulation(nextSimulation); setError("");
     } catch (reason) { setUser(null); setError(reason instanceof Error ? reason.message : "Backend indisponível"); }
     finally { setAuthChecked(true); }
   }, []);
@@ -2483,22 +2434,23 @@ export default function App() {
 
   const hideBottomNav = view === "processando" || view === "admin";
   const identity = displayIdentity(user);
-  const credits = usage?.bonus_credits || 0;
+  const remaining = usage?.remaining === "∞" ? 999 : Number(usage?.remaining || 0);
 
   if (!authChecked) return <div className="min-h-screen grid place-items-center px-6 text-center" style={{ background: "#08070C", color: "#A78BFA" }}><div className="grid justify-items-center gap-4"><RefreshCw className="animate-spin" /><p style={{ maxWidth: 380, color: "#F7F5FB", lineHeight: 1.6 }}>Eita! Muita gente está fazendo redação agora. Será que você consegue melhor que eles? 👀</p></div></div>;
   if (!user) return <LoginView onAuthenticated={loadData} />;
 
   return (
     <div style={{ background: "transparent", minHeight: "100dvh" }}>
-      <TopNav view={view} onNav={navigate} onLogout={logout} credits={credits} initials={identity.initials} username={identity.name} />
+      <div role="alert" style={{ position: "sticky", top: 0, zIndex: 100, padding: ".55rem 1rem", background: "#7C2D12", color: "#FFF7ED", textAlign: "center", fontWeight: 900, fontSize: ".78rem", letterSpacing: ".03em" }}>SIMULAÇÃO MANIPULADA PARA TESTES — SEM PAGAMENTOS, COMPETIÇÃO OU PRÊMIOS REAIS</div>
+      <TopNav view={view} onNav={navigate} onLogout={logout} remaining={remaining} initials={identity.initials} username={identity.name} />
       <main className="md:pt-16" style={{ paddingBottom: hideBottomNav ? 0 : undefined }}>
         <div className={hideBottomNav ? "" : "pb-24 md:pb-6"}>
           {error && <div role="alert" style={{ margin: "1rem", padding: ".8rem 1rem", borderRadius: "1rem", background: "#fee2e2", color: "#991b1b", fontSize: ".85rem" }}>{error}</div>}
-          {view === "dashboard" && <DashboardV3 onNav={navigate} usage={usage} analyses={analyses} theme={theme} accountCreatedAt={user.created_at} onSubmit={submitEssay} onSelectAnalysis={selectAnalysis} />}
+          {view === "dashboard" && <DashboardV3 onNav={navigate} usage={usage} analyses={analyses} theme={theme} accountCreatedAt={user.created_at} simulation={simulation} onSubmit={submitEssay} onSelectAnalysis={selectAnalysis} />}
           {view === "processando" && <ProcessandoView analysisId={analysisId} onComplete={finishAnalysis} onError={failAnalysis} />}
           {view === "resultado" && <ResultadoView onNav={navigate} detail={detail} />}
           {view === "historico" && <HistoricoView analyses={analyses} onSelect={selectAnalysis} onDelete={deleteAnalysis} onLoadMore={loadMoreAnalyses} hasMore={analyses.length < analysesTotal} />}
-          {view === "planos" && <PlanosView plans={plans} usage={usage} csrfToken={user?.csrf_token || ""} />}
+          {view === "planos" && <PlanosView plans={plans} usage={usage} csrfToken={user?.csrf_token || ""} onSimulationChanged={loadData} />}
           {view === "perfil" && <PerfilView onNav={navigate} user={user} usage={usage} analyses={analyses} onToggleReminders={toggleReminders} onLogout={logout} onDeleteAccount={deleteAccount} />}
           {view === "admin" && <RealAdminView onNav={navigate} csrfToken={user.csrf_token} onProfileChanged={loadData} />}
         </div>

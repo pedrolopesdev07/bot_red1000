@@ -8,7 +8,7 @@ from app.api.v1.schemas import AnalysisCreate, AnalysisDetail, AnalysisInsights,
 from app.core.queue import get_queue
 from app.core.web_security import get_current_user, rate_limit, require_csrf
 from app.database.database import SessionFactory, get_session
-from app.database.models import Analysis, CreditTransaction, EssayTopic, User
+from app.database.models import Analysis, EssayTopic, User
 from app.database.repositories.analyses import AnalysisRepository
 from app.services.usage import UsageLimiter
 from app.services.plans import get_plan_policy
@@ -26,7 +26,7 @@ def _summary(item: Analysis) -> AnalysisSummary:
 
 @router.post(
     "", response_model=AnalysisQueued, status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_csrf), Depends(rate_limit("analysis", 10, 3600))],
+    dependencies=[Depends(require_csrf), Depends(rate_limit("analysis", 120, 3600))],
 )
 async def create_analysis(
     payload: AnalysisCreate,
@@ -49,25 +49,15 @@ async def create_analysis(
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Informe ou selecione o tema da redação")
             policy = get_plan_policy(current_user.plan.name)
             usage = await UsageLimiter(db).consume(current_user)
-            paid_with_credits = False
             if usage is None:
-                if current_user.bonus_credits < 150:
-                    raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "Crédito indisponível")
-                paid_with_credits = True
-            detailed_feedback = policy.detailed_feedback or paid_with_credits
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Limite diário de correções atingido")
+            detailed_feedback = policy.detailed_feedback
             evaluation_engine = "LOCAL" if policy.gemini_daily_limit and usage and usage.used > policy.gemini_daily_limit else "GEMINI"
             analysis = await repository.create_queued(
                 user.id, payload.text, idempotency_key,
                 detailed_feedback=detailed_feedback, evaluation_engine=evaluation_engine,
                 topic_id=topic.id if topic else None, custom_topic=payload.custom_topic,
             )
-            if paid_with_credits:
-                current_user.bonus_credits -= 150
-                db.add(CreditTransaction(
-                    user_id=user.id, amount=-150, balance_after=current_user.bonus_credits,
-                    reason="ANALYSIS_PURCHASE", description="Correção Premium avulsa",
-                    analysis_id=analysis.id,
-                ))
             analysis_id, analysis_status = analysis.id, analysis.status.value
     if analysis_status == "QUEUED":
         queue = await get_queue()

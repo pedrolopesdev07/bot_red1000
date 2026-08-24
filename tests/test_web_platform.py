@@ -43,7 +43,8 @@ async def test_admin_requires_role_and_mfa() -> None:
 def test_api_exposes_versioned_routes_and_security_headers() -> None:
     paths = app.openapi()["paths"]
     assert "/api/v1/analyses" in paths
-    assert "/api/v1/webhooks/payment-provider" in paths
+    assert "/api/v1/simulation/profile" in paths
+    assert "/api/v1/simulation/action" in paths
     with TestClient(app) as client:
         response = client.get("/openapi.json")
     assert response.status_code == 200

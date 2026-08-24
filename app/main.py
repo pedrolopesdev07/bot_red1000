@@ -38,7 +38,7 @@ app.add_middleware(
     allow_origin_regex=settings.allowed_origin_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "X-Request-ID", "Stripe-Signature"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "X-Request-ID"],
 )
 
 @app.exception_handler(Exception)

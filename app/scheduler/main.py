@@ -10,7 +10,7 @@ from app.database.models import Analysis
 from app.database.models import AnalysisStatus
 from app.core.queue import get_queue
 from app.database.repositories.users import UserRepository
-from app.services.email import send_credit_reminder
+from app.services.email import send_daily_limit_reminder
 
 
 async def purge_expired_analyses(_: dict) -> None:
@@ -19,11 +19,11 @@ async def purge_expired_analyses(_: dict) -> None:
         await db.execute(delete(Analysis).where(Analysis.created_at < cutoff))
 
 
-async def send_due_credit_reminders(_: dict) -> None:
+async def send_due_daily_limit_reminders(_: dict) -> None:
     async with SessionFactory.begin() as db:
-        users = await UserRepository(db).due_credit_reminders()
+        users = await UserRepository(db).due_daily_limit_reminders()
         for user in users:
-            if user.email and await send_credit_reminder(user.email):
+            if user.email and await send_daily_limit_reminder(user.email):
                 user.last_reminder_at = datetime.now(timezone.utc)
 
 
@@ -46,10 +46,10 @@ async def recover_stale_analyses(_: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [purge_expired_analyses, send_due_credit_reminders, recover_stale_analyses]
+    functions = [purge_expired_analyses, send_due_daily_limit_reminders, recover_stale_analyses]
     cron_jobs = [
         cron(purge_expired_analyses, hour=3, minute=15),
-        cron(send_due_credit_reminders, minute={0, 15, 30, 45}),
+        cron(send_due_daily_limit_reminders, minute={0, 15, 30, 45}),
         cron(recover_stale_analyses, minute={5, 15, 25, 35, 45, 55}),
     ]
     redis_settings = redis_settings()

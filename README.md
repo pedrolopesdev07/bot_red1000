@@ -4,7 +4,7 @@ Plataforma web mobile-first para correção de redações do ENEM com Gemini.
 
 ## Visão rápida
 
-O sistema recebe a redação pela interface web, reserva créditos, coloca a avaliação em uma fila Redis e devolve o resultado processado pelo Gemini. A API é responsável por autenticação, histórico, planos, cobrança e administração; o frontend não recebe credenciais de provedores.
+O sistema recebe a redação pela interface web, reserva uma vaga do limite diário, coloca a avaliação em uma fila Redis e devolve o resultado processado pelo Gemini ou pelo avaliador local. A API é responsável por autenticação, histórico, vantagens de teste e administração.
 
 ### Estrutura do projeto
 
@@ -31,16 +31,16 @@ O sistema recebe a redação pela interface web, reserva créditos, coloca a ava
 - `app/scheduler`: retenção e lembretes; execute exatamente uma instância.
 - `app/services/gemini`: cliente, retry/timeout, prompt e validação do JSON.
 - `app/services/enem`: contrato independente do provedor, rubrica resumida e cálculo de nota.
-- `app/services/usage`: reserva atômica de créditos no PostgreSQL.
+- `app/services/usage`: reserva atômica do limite diário no PostgreSQL.
 - `app/database`: modelos e repositories SQLAlchemy assíncronos.
 
-A API responde `QUEUED` imediatamente e o worker processa o Gemini fora da requisição HTTP. ARQ foi escolhido por integrar naturalmente funções assíncronas Python e Redis com uma superfície operacional menor que Celery neste estágio. A nota total é recalculada no Python e a reserva de crédito ocorre antes do processamento, inclusive se o provedor falhar depois.
+A API responde `QUEUED` imediatamente e o worker processa a avaliação fora da requisição HTTP. As duas primeiras correções diárias usam Gemini; a partir da terceira, o avaliador local é utilizado. A nota total é recalculada no Python e a vaga diária é reservada antes do processamento.
 
 ## Stack e requisitos
 
-Python 3.12+, FastAPI, PostgreSQL, Redis, ARQ, SQLAlchemy 2, Alembic, Pydantic 2, Stripe, Vite, React 18, Tailwind e Docker Compose.
+Python 3.12+, FastAPI, PostgreSQL, Redis, ARQ, SQLAlchemy 2, Alembic, Pydantic 2, Vite, React 18, Tailwind e Docker Compose.
 
-O produto possui catálogo de temas persistido no banco, escolha entre tema sorteado e tema personalizado, extrato auditável de créditos e três planos: Free (1 correção essencial/dia), Premium (5 correções completas/dia) e Ultra Premium (correções ilimitadas). Cada correção avulsa completa consome 150 créditos.
+O modo atual é uma simulação manipulada e claramente identificada, sem pagamentos, participantes, competição ou prêmios reais. O acesso Básico oferece 10 correções por dia; Premium, 25; e Ultra Premium, correções ilimitadas. Planos, multiplicadores e mudanças de posição servem apenas para testar a interface.
 
 ## Operação
 
@@ -55,17 +55,13 @@ O produto possui catálogo de temas persistido no banco, escolha entre tema sort
 1. Instale Docker Desktop com Compose v2.
 2. Crie uma chave do Gemini no Google AI Studio.
 3. Configure uma conta Resend somente se desejar enviar lembretes por e-mail.
-4. Configure produtos/preços no Stripe e o webhook, caso vá testar cobrança.
+4. Execute a migration mais recente para habilitar o perfil de simulação.
 5. Copie `.env.example` para `.env` e preencha ao menos:
 
 ```env
 GEMINI_API_KEY=chave_gemini
 SECRET_KEY=valor-aleatorio-com-no-minimo-32-caracteres
 RESEND_API_KEY=
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PREMIUM_PRICE_ID=
-STRIPE_CREDITS_PRICE_ID=
 AUTH_DISABLED=false
 ```
 
@@ -86,7 +82,7 @@ O serviço `migrate` executa Alembic uma vez antes da API e dos workers. Em prod
 ## Segurança e privacidade
 
 - Sessões ficam no Redis e usam identificador opaco em cookie `HttpOnly`, `SameSite=Lax` e `Secure` em produção.
-- Operações mutáveis exigem CSRF; criação de análise e checkout exigem `Idempotency-Key`.
+- Operações mutáveis exigem CSRF; a criação de análise exige `Idempotency-Key`.
 - CORS aceita somente os domínios listados em `ALLOWED_ORIGINS`.
 - Previews podem ser limitados ao projeto por `ALLOWED_ORIGIN_REGEX`; nunca permita genericamente todo `vercel.app` com credenciais.
 - O frontend não recebe segredos nem usa `localStorage` para autenticação.
